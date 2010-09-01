@@ -90,7 +90,7 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
   lazy val JACKSON_VERSION       = "1.2.1"
   lazy val JERSEY_VERSION        = "1.2"
   lazy val LIFT_VERSION          = "2.1-M1"
-  lazy val MULTIVERSE_VERSION    = "0.6"
+  lazy val MULTIVERSE_VERSION    = "0.6.1"
   lazy val SCALATEST_VERSION     = "1.2-for-scala-2.8.0.final-SNAPSHOT"
   lazy val LOGBACK_VERSION       = "0.9.24"
   lazy val SLF4J_VERSION         = "1.6.0"
@@ -137,6 +137,7 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     lazy val dispatch_json = "net.databinder" % "dispatch-json_2.8.0" % DISPATCH_VERSION % "compile"
 
     lazy val jetty      = "org.eclipse.jetty" % "jetty-server" % JETTY_VERSION % "compile"
+    lazy val jetty_util = "org.eclipse.jetty" % "jetty-util"   % JETTY_VERSION % "compile"
     lazy val jetty_xml  = "org.eclipse.jetty" % "jetty-xml"    % JETTY_VERSION % "compile"
 
     lazy val guicey = "org.guiceyfruit" % "guice-all" % "2.0" % "compile"
@@ -422,6 +423,7 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     val atmo_tomcat      = Dependencies.atmo_tomcat
     val atmo_weblogic    = Dependencies.atmo_weblogic
     val jetty            = Dependencies.jetty
+    val jetty_util       = Dependencies.jetty_util
     val jetty_xml        = Dependencies.jetty_xml
     val jackson_core_asl = Dependencies.jackson_core_asl
     val jersey           = Dependencies.jersey
@@ -764,10 +766,13 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
 
   // ------------------------------------------------------------
   class AkkaDefaultProject(info: ProjectInfo, val deployPath: Path) extends DefaultProject(info) with DeployProject with OSGiProject {
+    lazy val sourceArtifact = Artifact(this.artifactID, "sources", "jar", Some("sources"), Nil, None)
+    lazy val docsArtifact = Artifact(this.artifactID, "docs", "jar", Some("docs"), Nil, None)
     override def runClasspath = super.runClasspath +++ (AkkaParentProject.this.info.projectPath / "config")
     override def testClasspath = super.testClasspath +++ (AkkaParentProject.this.info.projectPath / "config")
     override def packageDocsJar = this.defaultJarPath("-docs.jar")
     override def packageSrcJar  = this.defaultJarPath("-sources.jar")
+    override def packageToPublishActions = super.packageToPublishActions ++ Seq(this.packageDocs, this.packageSrc)
   }
 }
 
