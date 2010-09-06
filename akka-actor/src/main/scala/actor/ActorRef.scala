@@ -73,7 +73,6 @@ trait ActorRef extends
   @volatile protected[akka] var _isBeingRestarted = false
   @volatile protected[akka] var _homeAddress = new InetSocketAddress(RemoteServerModule.HOSTNAME, RemoteServerModule.PORT)
   @volatile protected[akka] var _futureTimeout: Option[ScheduledFuture[AnyRef]] = None
-  @volatile protected[akka] var startOnCreation = false
   @volatile protected[akka] var registeredInRemoteNodeDuringSerialization = false
   protected[akka] val guard = new ReentrantGuard
 
@@ -1155,7 +1154,9 @@ class LocalActorRef private[akka](
     val actor = actorFactory match {
       case Left(Some(clazz)) =>
         try {
-          clazz.newInstance
+          val ctor = clazz.getConstructor()
+          ctor.setAccessible(true)
+          ctor.newInstance()
         } catch {
           case e: InstantiationException => throw new ActorInitializationException(
             "Could not instantiate Actor due to:\n" + e +
