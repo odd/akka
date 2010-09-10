@@ -207,9 +207,7 @@ object ReflectiveAccess {
     ctor.setAccessible(true)
     Some(ctor.newInstance(args: _*).asInstanceOf[T])
   } catch {
-    case e: Exception =>
-      Logger("createInstance").error(e, "Couldn't load [%s(%s) => %s(%s)]",clazz.getName,params.mkString(", "),clazz.getName,args.mkString(", "))
-      None
+    case e: Exception => None
   }
 
   def createInstance[T](fqn: String,
