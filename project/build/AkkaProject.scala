@@ -41,6 +41,8 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
 
   object Repositories {
     lazy val AkkaRepo             = MavenRepository("Akka Repository", "http://scalablesolutions.se/akka/repository")
+    lazy val CasbahRepo           = MavenRepository("Casbah Repo", "http://repo.bumnetworks.com/releases")
+    lazy val CasbahSnapshotRepo   = MavenRepository("Casbah Snapshots", "http://repo.bumnetworks.com/snapshots")
     lazy val CodehausRepo         = MavenRepository("Codehaus Repo", "http://repository.codehaus.org")
     lazy val EmbeddedRepo         = MavenRepository("Embedded Repo", (info.projectPath / "embedded-repo").asURL.toString)
     lazy val FusesourceSnapshotRepo = MavenRepository("Fusesource Snapshots", "http://repo.fusesource.com/nexus/content/repositories/snapshots")
@@ -50,6 +52,7 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     lazy val SonatypeSnapshotRepo = MavenRepository("Sonatype OSS Repo", "http://oss.sonatype.org/content/repositories/releases")
     lazy val SunJDMKRepo          = MavenRepository("Sun JDMK Repo", "http://wp5.e-taxonomy.eu/cdmlib/mavenrepo")
     lazy val CasbahRepoReleases   = MavenRepository("Casbah Release Repo", "http://repo.bumnetworks.com/releases")
+    lazy val ZookeeperRepo        = MavenRepository("Zookeeper Repo", "http://lilycms.org/maven/maven2/deploy/")
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -77,6 +80,9 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
   lazy val logbackModuleConfig     = ModuleConfiguration("ch.qos.logback",sbt.DefaultMavenRepository)
   lazy val atomikosModuleConfig    = ModuleConfiguration("com.atomikos",sbt.DefaultMavenRepository)
   lazy val casbahRelease           = ModuleConfiguration("com.novus",CasbahRepoReleases)
+  lazy val zookeeperRelease        = ModuleConfiguration("org.apache.hadoop.zookeeper",ZookeeperRepo)
+  lazy val casbahModuleConfig      = ModuleConfiguration("com.novus", CasbahRepo)
+  lazy val timeModuleConfig        = ModuleConfiguration("org.scala-tools", "time", CasbahSnapshotRepo)
   lazy val embeddedRepo            = EmbeddedRepo // This is the only exception, because the embedded repo is fast!
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -170,8 +176,6 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
 
     lazy val casbah = "com.novus" % "casbah_2.8.0" % "1.0.8.5" % "compile"
 
-    lazy val time = "org.scala-tools" % "time" % "2.8.0-SNAPSHOT-0.2-SNAPSHOT" % "compile"
-
     lazy val multiverse = "org.multiverse" % "multiverse-alpha" % MULTIVERSE_VERSION % "compile" intransitive
 
     lazy val netty = "org.jboss.netty" % "netty" % "3.2.2.Final" % "compile"
@@ -203,6 +207,12 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     lazy val werkz      = "org.codehaus.aspectwerkz" % "aspectwerkz-nodeps-jdk5" % ASPECTWERKZ_VERSION % "compile"
     lazy val werkz_core = "org.codehaus.aspectwerkz" % "aspectwerkz-jdk5"        % ASPECTWERKZ_VERSION % "compile"
 
+    lazy val zookeeper  = "org.apache.hadoop.zookeeper" % "zookeeper" % "3.2.2" % "compile"
+
+    lazy val hadoop_core = "org.apache.hadoop" % "hadoop-core" % "0.20.2" % "compile"
+
+    lazy val hbase_core = "org.apache.hbase" % "hbase-core" % "0.20.6" % "compile"
+
     // Test
 
     lazy val camel_spring   = "org.apache.camel"       % "camel-spring"        % CAMEL_VERSION     % "test"
@@ -216,6 +226,10 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     lazy val junit          = "junit"                  % "junit"               % "4.5"             % "test"
     lazy val mockito        = "org.mockito"            % "mockito-all"         % "1.8.1"           % "test"
     lazy val scalatest      = "org.scalatest"          % "scalatest"           % SCALATEST_VERSION % "test"
+    lazy val hadoop_test    = "org.apache.hadoop"      % "hadoop-test"         % "0.20.2"          % "test"
+    lazy val hbase_test     = "org.apache.hbase"       % "hbase-test"          % "0.20.6"          % "test"
+    lazy val log4j          = "log4j"                  % "log4j"               % "1.2.15"          % "test"
+    lazy val jett_mortbay   = "org.mortbay.jetty"      % "jetty"               % "6.1.14"          % "test"
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -461,6 +475,8 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
       new AkkaMongoProject(_), akka_persistence_common)
     lazy val akka_persistence_cassandra = project("akka-persistence-cassandra", "akka-persistence-cassandra",
       new AkkaCassandraProject(_), akka_persistence_common)
+    lazy val akka_persistence_hbase = project("akka-persistence-hbase", "akka-persistence-hbase",
+      new AkkaHbaseProject(_), akka_persistence_common)
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -508,6 +524,22 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     val high_scale     = Dependencies.high_scale
 
     override def testOptions = TestFilter((name: String) => name.endsWith("Test")) :: Nil
+  }
+
+  // -------------------------------------------------------------------------------------------------------------------
+  // akka-persistence-hbase subproject
+  // -------------------------------------------------------------------------------------------------------------------
+
+  class AkkaHbaseProject(info: ProjectInfo) extends AkkaDefaultProject(info, distPath) {
+    val zookeeper   = Dependencies.zookeeper
+    val hadoop_core = Dependencies.hadoop_core
+    val hbase_core  = Dependencies.hbase_core
+ 
+    // testing
+    val hadoop_test = Dependencies.hadoop_test
+    val hbase_test  = Dependencies.hbase_test
+    val jetty       = Dependencies.jett_mortbay
+    val log4j       = Dependencies.log4j
   }
 
   // -------------------------------------------------------------------------------------------------------------------
