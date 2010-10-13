@@ -56,6 +56,15 @@ object ClientInitiatedRemoteActorSpec {
         SendOneWayAndReplySenderActor.latch.countDown
     }
   }
+
+  class MyActorCustomConstructor extends Actor {
+    var prefix = "default-"
+    var count = 0
+    def receive = {
+      case "incrPrefix" => count += 1; prefix = "" + count + "-" 
+      case msg: String => self.reply(prefix + msg)
+    }
+  }
 }
 
 class ClientInitiatedRemoteActorSpec extends JUnitSuite {
@@ -79,6 +88,8 @@ class ClientInitiatedRemoteActorSpec extends JUnitSuite {
   @After
   def finished() {
     s1.shutdown
+    val s2 = RemoteServer.serverFor(HOSTNAME, PORT2)
+    if (s2.isDefined) s2.get.shutdown
     RemoteClient.shutdownAll
     Thread.sleep(1000)
   }
@@ -122,6 +133,19 @@ class ClientInitiatedRemoteActorSpec extends JUnitSuite {
   }
 
   @Test
+  def shouldSendBangBangMessageAndReceiveReplyConcurrently = {
+    val actors = (1 to 10).
+      map(num => {
+        val a = actorOf[RemoteActorSpecActorBidirectional]
+        a.makeRemote(HOSTNAME, PORT1)
+        a.start
+      }).toList
+    actors.map(_ !!! "Hello").
+           foreach(future => assert("World" === future.await.result.asInstanceOf[Option[String]].get))
+    actors.foreach(_.stop)
+  }
+
+  @Test
   def shouldSendAndReceiveRemoteException {
     implicit val timeout = 500000000L
     val actor = actorOf[RemoteActorSpecActorBidirectional]
@@ -135,6 +159,26 @@ class ClientInitiatedRemoteActorSpec extends JUnitSuite {
         assert("Expected exception; to test fault-tolerance" === e.getMessage())
     }
     actor.stop
-  }  
+  }
+
+  @Test
+  def shouldRegisterActorByUuid {
+    val actor1 = actorOf[MyActorCustomConstructor]
+    actor1.makeRemote(HOSTNAME, PORT1)
+    actor1.start
+    actor1 ! "incrPrefix"
+    assert((actor1 !! "test").get === "1-test")
+    actor1 ! "incrPrefix"
+    assert((actor1 !! "test").get === "2-test")
+
+    val actor2 = actorOf[MyActorCustomConstructor]
+    actor2.makeRemote(HOSTNAME, PORT1)
+    actor2.start
+
+    assert((actor2 !! "test").get === "default-test")
+
+    actor1.stop
+    actor2.stop
+  }
 }
 

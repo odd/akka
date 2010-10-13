@@ -44,7 +44,9 @@ abstract class RemoteActor(address: InetSocketAddress) extends Actor {
  */
 @serializable sealed trait LifeCycleMessage
 
-case class HotSwap(code: Option[Actor.Receive]) extends LifeCycleMessage
+case class HotSwap(code: Actor.Receive) extends LifeCycleMessage
+
+case object RevertHotSwap extends LifeCycleMessage
 
 case class Restart(reason: Throwable) extends LifeCycleMessage
 
@@ -142,99 +144,6 @@ object Actor extends Logging {
   def actorOf(factory: => Actor): ActorRef = new LocalActorRef(() => factory)
 
   /**
-   * Use to create an anonymous event-driven actor.
-   * <p/>
-   * The actor is created with a 'permanent' life-cycle configuration, which means that
-   * if the actor is supervised and dies it will be restarted.
-   * <p/>
-   * The actor is started when created.
-   * Example:
-   * <pre>
-   * import Actor._
-   *
-   * val a = actor  {
-   *   case msg => ... // handle message
-   * }
-   * </pre>
-   */
-  def actor(body: Receive): ActorRef =
-    actorOf(new Actor() {
-      self.lifeCycle = Some(LifeCycle(Permanent))
-      def receive: Receive = body
-    }).start
-
-  /**
-   * Use to create an anonymous transactional event-driven actor.
-   * <p/>
-   * The actor is created with a 'permanent' life-cycle configuration, which means that
-   * if the actor is supervised and dies it will be restarted.
-   * <p/>
-   * The actor is started when created.
-   * Example:
-   * <pre>
-   * import Actor._
-   *
-   * val a = transactor  {
-   *   case msg => ... // handle message
-   * }
-   * </pre>
-   */
-  def transactor(body: Receive): ActorRef =
-    actorOf(new Transactor() {
-      self.lifeCycle = Some(LifeCycle(Permanent))
-      def receive: Receive = body
-    }).start
-
-  /**
-   * Use to create an anonymous event-driven actor with a 'temporary' life-cycle configuration,
-   * which means that if the actor is supervised and dies it will *not* be restarted.
-   * <p/>
-   * The actor is started when created.
-   * Example:
-   * <pre>
-   * import Actor._
-   *
-   * val a = temporaryActor  {
-   *   case msg => ... // handle message
-   * }
-   * </pre>
-   */
-  def temporaryActor(body: Receive): ActorRef =
-    actorOf(new Actor() {
-      self.lifeCycle = Some(LifeCycle(Temporary))
-      def receive = body
-    }).start
-
-  /**
-   * Use to create an anonymous event-driven actor with both an init block and a message loop block.
-   * <p/>
-   * The actor is created with a 'permanent' life-cycle configuration, which means that
-   * if the actor is supervised and dies it will be restarted.
-   * <p/>
-   * The actor is started when created.
-   * Example:
-   * <pre>
-   * val a = Actor.init  {
-   *   ... // init stuff
-   * } receive   {
-   *   case msg => ... // handle message
-   * }
-   * </pre>
-   *
-   */
-  def init[A](body: => Unit) = {
-    def handler[A](body: => Unit) = new {
-      def receive(handler: Receive) =
-        actorOf(new Actor() {
-          self.lifeCycle = Some(LifeCycle(Permanent))
-          body
-          def receive = handler
-        }).start
-    }
-    handler(body)
-  }
-
-  /**
    * Use to spawn out a block of code in an event-driven actor. Will shut actor down when
    * the block has been executed.
    * <p/>
@@ -249,9 +158,10 @@ object Actor extends Logging {
    * }
    * </pre>
    */
-  def spawn(body: => Unit): Unit = {
+  def spawn(body: => Unit)(implicit dispatcher: MessageDispatcher = Dispatchers.defaultGlobalDispatcher): Unit = {
     case object Spawn
     actorOf(new Actor() {
+      self.dispatcher = dispatcher
       def receive = {
         case Spawn => try { body } finally { self.stop }
       }
@@ -438,21 +348,16 @@ trait Actor extends Logging {
    */
   def isDefinedAt(message: Any): Boolean = processingBehavior.isDefinedAt(message)
 
-  /** One of the fundamental methods of the ActorsModel
-   * Actor assumes a new behavior,
-   * None reverts the current behavior to the original behavior
+  /**
+   * Changes tha Actor's behavior to become the new 'Receive' (PartialFunction[Any, Unit]) handler.
+   * Puts the behavior on top of the hotswap stack. 
    */
-  def become(behavior: Option[Receive]) {
-    self.hotswap = behavior
-    self.checkReceiveTimeout // FIXME : how to reschedule receivetimeout on hotswap?
-  }
+  def become(behavior: Receive): Unit = self.hotswap = self.hotswap.push(behavior)
 
-  /** Akka Java API
-   * One of the fundamental methods of the ActorsModel
-   * Actor assumes a new behavior,
-   * null reverts the current behavior to the original behavior
+  /**
+   * Reverts the Actor behavior to the previous one in the hotswap stack.
    */
-  def become(behavior: Receive): Unit = become(Option(behavior))
+  def unbecome: Unit = if (!self.hotswap.isEmpty) self.hotswap = self.hotswap.pop
 
   // =========================================
   // ==== INTERNAL IMPLEMENTATION DETAILS ====
@@ -464,13 +369,14 @@ trait Actor extends Logging {
     lazy val defaultBehavior = receive
     val actorBehavior: Receive = {
       case HotSwap(code)                 => become(code)
+      case RevertHotSwap                 => unbecome
       case Exit(dead, reason)            => self.handleTrapExit(dead, reason)
       case Link(child)                   => self.link(child)
       case Unlink(child)                 => self.unlink(child)
       case UnlinkAndStop(child)          => self.unlink(child); child.stop
       case Restart(reason)               => throw reason
-      case msg if self.hotswap.isDefined &&
-                  self.hotswap.get.isDefinedAt(msg) => self.hotswap.get.apply(msg)
+      case msg if !self.hotswap.isEmpty &&
+                  self.hotswap.head.isDefinedAt(msg) => self.hotswap.head.apply(msg)
       case msg if self.hotswap.isEmpty   &&
                   defaultBehavior.isDefinedAt(msg)  => defaultBehavior.apply(msg)
     }

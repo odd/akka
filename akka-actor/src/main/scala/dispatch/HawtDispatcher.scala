@@ -13,51 +13,44 @@ import org.fusesource.hawtdispatch.ListEventAggregator
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicBoolean}
 import java.util.concurrent.CountDownLatch
+import se.scalablesolutions.akka.util.Switch
 
 /**
- * Holds helper methods for working with actors that are using
- * a HawtDispatcher as it's dispatcher.
+ * Holds helper methods for working with actors that are using a HawtDispatcher as it's dispatcher.
  */
 object HawtDispatcher {
 
   private val retained = new AtomicInteger()
+
   @volatile private var shutdownLatch: CountDownLatch = _
 
-  private def retainNonDaemon = {
-    if( retained.getAndIncrement == 0 ) {
-      shutdownLatch = new CountDownLatch(1)
-      new Thread("HawtDispatch Non-Daemon") {
-        override def run = {
-          try {
-            shutdownLatch.await
-          } catch {
-            case _ =>
-          }
+  private def retainNonDaemon = if (retained.getAndIncrement == 0) {
+    shutdownLatch = new CountDownLatch(1)
+    new Thread("HawtDispatch Non-Daemon") {
+      override def run = {
+        try {
+          shutdownLatch.await
+        } catch {
+          case _ =>
         }
-      }.start()
-    }
+      }
+    }.start()
   }
 
-  private def releaseNonDaemon = {
-    if( retained.decrementAndGet == 0 ) {
-      shutdownLatch.countDown
-      shutdownLatch = null
-    }
+  private def releaseNonDaemon = if (retained.decrementAndGet == 0) {
+    shutdownLatch.countDown
+    shutdownLatch = null
   }
 
   /**
    * @return the mailbox associated with the actor
    */
-  private def mailbox(actorRef: ActorRef) = {
-    actorRef.mailbox.asInstanceOf[HawtDispatcherMailbox]
-  }
+  private def mailbox(actorRef: ActorRef) = actorRef.mailbox.asInstanceOf[HawtDispatcherMailbox]
 
   /**
    * @return the dispatch queue associated with the actor
    */
-  def queue(actorRef: ActorRef) = {
-    mailbox(actorRef).queue
-  }
+  def queue(actorRef: ActorRef) = mailbox(actorRef).queue
 
   /**
    * <p>
@@ -71,13 +64,11 @@ object HawtDispatcher {
    *
    * @return true if the actor was pinned
    */
-  def pin(actorRef: ActorRef) = {
-    actorRef.mailbox match {
-      case x:HawtDispatcherMailbox=>
-        x.queue.setTargetQueue( getRandomThreadQueue )
-        true
-      case _ => false
-    }
+  def pin(actorRef: ActorRef) = actorRef.mailbox match {
+    case x: HawtDispatcherMailbox =>
+      x.queue.setTargetQueue( getRandomThreadQueue )
+      true
+    case _ => false
   }
 
   /**
@@ -91,19 +82,14 @@ object HawtDispatcher {
    * </p>
    * @return true if the actor was unpinned
    */
-  def unpin(actorRef: ActorRef) = {
-    target(actorRef, globalQueue)
-  }
+  def unpin(actorRef: ActorRef) = target(actorRef, globalQueue)
 
   /**
    * @return true if the actor was pinned to a thread.
    */
-  def pinned(actorRef: ActorRef):Boolean = {
-    actorRef.mailbox match {
-      case x:HawtDispatcherMailbox=>
-        x.queue.getTargetQueue.getQueueType == QueueType.THREAD_QUEUE
-      case _ => false
-    }
+  def pinned(actorRef: ActorRef):Boolean = actorRef.mailbox match {
+    case x: HawtDispatcherMailbox => x.queue.getTargetQueue.getQueueType == QueueType.THREAD_QUEUE
+    case _ => false
   }
 
   /**
@@ -117,15 +103,12 @@ object HawtDispatcher {
    * </p>
    * @return true if the actor was unpinned
    */
-  def target(actorRef: ActorRef, parent:DispatchQueue) = {
-    actorRef.mailbox match {
-      case x:HawtDispatcherMailbox=>
-        x.queue.setTargetQueue( parent )
-        true
-      case _ => false
-    }
+  def target(actorRef: ActorRef, parent: DispatchQueue) = actorRef.mailbox match {
+    case x: HawtDispatcherMailbox =>
+      x.queue.setTargetQueue(parent)
+      true
+    case _ => false
   }
-
 }
 
 /**
@@ -156,25 +139,20 @@ object HawtDispatcher {
  *
  * @author <a href="http://hiramchirino.com">Hiram Chirino</a>
  */
-class HawtDispatcher(val aggregate:Boolean=true, val parent:DispatchQueue=globalQueue) extends MessageDispatcher  {
+class HawtDispatcher(val aggregate: Boolean = true, val parent: DispatchQueue = globalQueue) extends MessageDispatcher  {
   import HawtDispatcher._
-  private val active = new AtomicBoolean(false)
 
-  def start = {
-    if( active.compareAndSet(false, true) ) {
-      retainNonDaemon
-    }
-  }
+  private val active = new Switch(false)
 
-  def shutdown = {
-    if( active.compareAndSet(true, false) ) {
-      releaseNonDaemon
-    }
-  }
+  val mailboxType: Option[MailboxType] = None
+ 
+  def start = active switchOn { retainNonDaemon }
 
-  def isShutdown = !active.get
+  def shutdown = active switchOff { releaseNonDaemon }
 
-  def dispatch(invocation: MessageInvocation) = if(active.get()) {
+  def isShutdown = active.isOff
+
+  def dispatch(invocation: MessageInvocation) = if (active.isOn) {
     mailbox(invocation.receiver).dispatch(invocation)
   } else {
     log.warning("%s is shut down,\n\tignoring the the messages sent to\n\t%s", toString, invocation.receiver)
@@ -191,15 +169,28 @@ class HawtDispatcher(val aggregate:Boolean=true, val parent:DispatchQueue=global
     else new HawtDispatcherMailbox(queue)
   }
 
-  override def toString = "HawtDispatchEventDrivenDispatcher"
+  def suspend(actorRef: ActorRef) = mailbox(actorRef).suspend
+  def resume(actorRef:ActorRef)   = mailbox(actorRef).resume
+
+  def createTransientMailbox(actorRef: ActorRef, mailboxType: TransientMailboxType): AnyRef = null.asInstanceOf[AnyRef]
+
+  /**
+   * Creates and returns a durable mailbox for the given actor.
+   */
+  protected def createDurableMailbox(actorRef: ActorRef, mailboxType: DurableMailboxType): AnyRef = null.asInstanceOf[AnyRef]
+
+  override def toString = "HawtDispatcher"
 }
 
-class HawtDispatcherMailbox(val queue:DispatchQueue) {
-  def dispatch(invocation: MessageInvocation):Unit = {
+class HawtDispatcherMailbox(val queue: DispatchQueue) {
+  def dispatch(invocation: MessageInvocation) {
     queue {
       invocation.invoke
     }
   }
+
+  def suspend = queue.suspend
+  def resume  = queue.resume
 }
 
 class AggregatingHawtDispatcherMailbox(queue:DispatchQueue) extends HawtDispatcherMailbox(queue) {
@@ -207,14 +198,13 @@ class AggregatingHawtDispatcherMailbox(queue:DispatchQueue) extends HawtDispatch
   source.setEventHandler (^{drain_source} )
   source.resume
 
-  private def drain_source = {
-    source.getData.foreach { invocation =>
-      invocation.invoke
-    }
-  }
+  private def drain_source = source.getData.foreach(_.invoke)
 
-  override def dispatch(invocation: MessageInvocation):Unit = {
-    if ( getCurrentQueue == null ) {
+  override def suspend = source.suspend
+  override def resume  = source.resume
+
+  override def dispatch(invocation: MessageInvocation) {
+    if (getCurrentQueue eq null) {
       // we are being call from a non hawtdispatch thread, can't aggregate
       // it's events
       super.dispatch(invocation)

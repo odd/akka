@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 
 object ExecutorBasedEventDrivenDispatcherActorSpec {
   class TestActor extends Actor {
-    self.dispatcher = Dispatchers.newExecutorBasedEventDrivenDispatcher(self.uuid)
+    self.dispatcher = Dispatchers.newExecutorBasedEventDrivenDispatcher(self.uuid.toString)
     def receive = {
       case "Hello" =>
         self.reply("World")
@@ -23,7 +23,7 @@ object ExecutorBasedEventDrivenDispatcherActorSpec {
     val oneWay = new CountDownLatch(1)
   }
   class OneWayTestActor extends Actor {
-    self.dispatcher = Dispatchers.newExecutorBasedEventDrivenDispatcher(self.uuid)
+    self.dispatcher = Dispatchers.newExecutorBasedEventDrivenDispatcher(self.uuid.toString)
     def receive = {
       case "OneWay" => OneWayTestActor.oneWay.countDown
     }
@@ -68,7 +68,7 @@ class ExecutorBasedEventDrivenDispatcherActorSpec extends JUnitSuite {
   }
 
  @Test def shouldRespectThroughput {
-   val throughputDispatcher = new ExecutorBasedEventDrivenDispatcher("THROUGHPUT",101,0,Dispatchers.MAILBOX_CONFIG, (e) => {
+   val throughputDispatcher = new ExecutorBasedEventDrivenDispatcher("THROUGHPUT",101,0,Dispatchers.MAILBOX_TYPE, (e) => {
       e.setCorePoolSize(1)
    })
 
@@ -103,7 +103,7 @@ class ExecutorBasedEventDrivenDispatcherActorSpec extends JUnitSuite {
 
  @Test def shouldRespectThroughputDeadline {
    val deadlineMs = 100
-   val throughputDispatcher = new ExecutorBasedEventDrivenDispatcher("THROUGHPUT",2,deadlineMs,Dispatchers.MAILBOX_CONFIG, (e) => {
+   val throughputDispatcher = new ExecutorBasedEventDrivenDispatcher("THROUGHPUT",2,deadlineMs,Dispatchers.MAILBOX_TYPE, (e) => {
       e.setCorePoolSize(1)
    })
 
@@ -130,9 +130,9 @@ class ExecutorBasedEventDrivenDispatcherActorSpec extends JUnitSuite {
    slowOne ! "hogexecutor"
    slowOne ! "ping"
    fastOne ! "ping"
-   assert(ready.await(5,TimeUnit.SECONDS) === true)
-   Thread.sleep(deadlineMs)
+   assert(ready.await(2,TimeUnit.SECONDS) === true)
+   Thread.sleep(deadlineMs+10) // wait just a bit more than the deadline
    start.countDown
-   assert(latch.await(10,TimeUnit.SECONDS) === true)
+   assert(latch.await(2,TimeUnit.SECONDS) === true)
  }
 }

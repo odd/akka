@@ -8,6 +8,7 @@ import org.scalatest.junit.JUnitRunner
 import org.junit.runner.RunWith
 
 import se.scalablesolutions.akka.serialization._
+// import dispatch.json._
 import se.scalablesolutions.akka.actor._
 import ActorSerialization._
 import Actor._
@@ -17,7 +18,6 @@ class SerializableTypeClassActorSpec extends
   Spec with
   ShouldMatchers with
   BeforeAndAfterAll {
-
 
   object BinaryFormatMyActor {
     implicit object MyActorFormat extends Format[MyActor] {
@@ -50,6 +50,10 @@ class SerializableTypeClassActorSpec extends
 
   object BinaryFormatMyStatelessActorWithMessagesInMailbox {
     implicit object MyStatelessActorFormat extends StatelessActorFormat[MyStatelessActorWithMessagesInMailbox]
+  }
+
+  object BinaryFormatMyActorWithSerializableMessages {
+    implicit object MyActorWithSerializableMessagesFormat extends StatelessActorFormat[MyActorWithSerializableMessages]
   }
 
   object BinaryFormatMyJavaSerializableActor {
@@ -111,6 +115,8 @@ class SerializableTypeClassActorSpec extends
       (actor2 !! "hello").getOrElse("_") should equal("world 3")
 
       actor2.receiveTimeout should equal (Some(1000))
+      actor1.stop
+      actor2.stop
     }
 
     it("should be able to serialize and deserialize a MyStatelessActorWithMessagesInMailbox") {
@@ -138,6 +144,69 @@ class SerializableTypeClassActorSpec extends
       actor3.mailboxSize should equal(0)
       (actor3 !! "hello-reply").getOrElse("_") should equal("world")
     }
+
+    it("should be able to serialize and de-serialize an Actor hotswapped with 'become'") {
+      import BinaryFormatMyActor._
+      val actor1 = actorOf[MyActor].start
+      (actor1 !! "hello").getOrElse("_") should equal("world 1")
+      (actor1 !! "hello").getOrElse("_") should equal("world 2")
+      actor1 ! "swap"
+      (actor1 !! "hello").getOrElse("_") should equal("swapped")
+
+      val bytes = toBinary(actor1)
+      val actor2 = fromBinary(bytes)
+      actor2.start
+
+      (actor1 !! "hello").getOrElse("_") should equal("swapped")
+
+      actor1 ! RevertHotSwap
+      (actor2 !! "hello").getOrElse("_") should equal("world 3")
+    }
+/*
+    it("should be able to serialize and de-serialize an hotswapped actor") {
+      import BinaryFormatMyActor._
+
+      val actor1 = actorOf[MyActor].start
+      (actor1 !! "hello").getOrElse("_") should equal("world 1")
+      (actor1 !! "hello").getOrElse("_") should equal("world 2")
+      actor1 ! HotSwap {
+        case "hello" =>
+          self.reply("swapped")
+      }
+      (actor1 !! "hello").getOrElse("_") should equal("swapped")
+
+      val bytes = toBinary(actor1)
+      val actor2 = fromBinary(bytes)
+      actor2.start
+
+      (actor1 !! "hello").getOrElse("_") should equal("swapped")
+
+      actor1 ! RevertHotSwap
+      (actor2 !! "hello").getOrElse("_") should equal("world 3")
+    }
+*/
+  }
+  describe("Custom serializable actors") {
+    it("should serialize and de-serialize") {
+      import BinaryFormatMyActorWithSerializableMessages._
+
+      val actor1 = actorOf[MyActorWithSerializableMessages].start
+      (actor1 ! MyMessage("hello1", ("akka", 100)))
+      (actor1 ! MyMessage("hello2", ("akka", 200)))
+      (actor1 ! MyMessage("hello3", ("akka", 300)))
+      (actor1 ! MyMessage("hello4", ("akka", 400)))
+      (actor1 ! MyMessage("hello5", ("akka", 500)))
+      actor1.mailboxSize should be > (0)
+      val actor2 = fromBinary(toBinary(actor1))
+      Thread.sleep(1000)
+      actor2.mailboxSize should be > (0)
+      (actor2 !! "hello-reply").getOrElse("_") should equal("world")
+
+      val actor3 = fromBinary(toBinary(actor1, false))
+      Thread.sleep(1000)
+      actor3.mailboxSize should equal(0)
+      (actor3 !! "hello-reply").getOrElse("_") should equal("world")
+    }
   }
 }
 
@@ -152,13 +221,15 @@ class MyActorWithDualCounter extends Actor {
   }
 }
 
-class MyActor extends Actor {
+@serializable class MyActor extends Actor {
   var count = 0
 
   def receive = {
     case "hello" =>
       count = count + 1
       self.reply("world " + count)
+    case "swap" => 
+      become { case "hello" => self.reply("swapped") }
   }
 }
 
@@ -187,4 +258,30 @@ class MyStatelessActorWithMessagesInMailbox extends Actor {
       count = count + 1
       self.reply("world " + count)
   }
+}
+
+class MyActorWithSerializableMessages extends Actor {
+  def receive = {
+    case MyMessage(s, t) =>
+      println("# messages in mailbox " + self.mailboxSize)
+      Thread.sleep(500)
+    case "hello-reply" => self.reply("world")
+  }
+}
+
+case class MyMessage(val id: String, val value: Tuple2[String, Int])
+  extends Serializable.ScalaJSON[MyMessage] {
+
+  def this() = this(null, null)
+
+  import DefaultProtocol._
+  import JsonSerialization._
+
+  implicit val MyMessageFormat: sjson.json.Format[MyMessage] =
+    asProduct2("id", "value")(MyMessage)(MyMessage.unapply(_).get)
+
+  def toJSON: String = JsValue.toJson(tojson(this))
+  def toBytes: Array[Byte] = tobinary(this)
+  def fromBytes(bytes: Array[Byte]) = frombinary[MyMessage](bytes)
+  def fromJSON(js: String) = fromjson[MyMessage](Js(js))
 }

@@ -72,6 +72,8 @@ class ServerInitiatedRemoteActorSpec extends JUnitSuite {
   def finished {
     try {
       server.shutdown
+      val s2 = RemoteServer.serverFor(HOSTNAME, PORT + 1)
+      if (s2.isDefined) s2.get.shutdown
       RemoteClient.shutdownAll
       Thread.sleep(1000)
     } catch {
@@ -141,7 +143,7 @@ class ServerInitiatedRemoteActorSpec extends JUnitSuite {
       var found = RemoteServer.serverFor("localhost", 9990)
       assert(found.isDefined, "sever not found")
 
-      val a = actor { case _ => }
+      val a = actorOf( new Actor { def receive = { case _ => } } ).start
 
       found = RemoteServer.serverFor("localhost", 9990)
       assert(found.isDefined, "sever not found after creating an actor")
@@ -199,18 +201,18 @@ class ServerInitiatedRemoteActorSpec extends JUnitSuite {
   def shouldRegisterAndUnregister {
     val actor1 = actorOf[RemoteActorSpecActorUnidirectional]
     server.register("my-service-1", actor1)
-    assert(server.actors().get("my-service-1") != null, "actor registered")
+    assert(server.actors().get("my-service-1") ne null, "actor registered")
     server.unregister("my-service-1")
-    assert(server.actors().get("my-service-1") == null, "actor unregistered")
+    assert(server.actors().get("my-service-1") eq null, "actor unregistered")
   }
 
   @Test
   def shouldRegisterAndUnregisterByUuid {
     val actor1 = actorOf[RemoteActorSpecActorUnidirectional]
     server.register("uuid:" + actor1.uuid, actor1)
-    assert(server.actorsByUuid().get(actor1.uuid) != null, "actor registered")
+    assert(server.actorsByUuid().get(actor1.uuid.toString) ne null, "actor registered")
     server.unregister("uuid:" + actor1.uuid)
-    assert(server.actorsByUuid().get(actor1.uuid) == null, "actor unregistered")
+    assert(server.actorsByUuid().get(actor1.uuid) eq null, "actor unregistered")
   }
 
 }
