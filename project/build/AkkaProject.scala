@@ -326,8 +326,8 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
   //override def defaultPublishRepository = Some(Resolver.file("maven-local", Path.userHome / ".m2" / "repository" asFile))
   val publishTo = Resolver.file("maven-local", Path.userHome / ".m2" / "repository" asFile)
 
-  val sourceArtifact = Artifact(artifactID, "sources", "jar", Some("sources"), Nil, None)
-  val docsArtifact = Artifact(artifactID, "docs", "jar", Some("docs"), Nil, None)
+  val sourceArtifact = Artifact(artifactID, "src", "jar", Some("sources"), Nil, None)
+  val docsArtifact = Artifact(artifactID, "doc", "jar", Some("docs"), Nil, None)
 
   // Credentials(Path.userHome / ".akka_publish_credentials", log)
 
@@ -358,7 +358,7 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     for (absPath <- akkaArtifacts.getPaths) {
       val artifactRE = """(.*)(?:\\|/)dist(?:\\|/)(.*)-(.*)\.jar""".r
       val artifactRE(path, artifactId, artifactVersion) = absPath
-      val command = "mvn install:install-file" +
+      val command = """d:\mvn\bin\mvn.bat install:install-file""" +
                     " -Dfile=" + absPath +
                     " -DgroupId=se.scalablesolutions.akka" +
                     " -DartifactId=" + artifactId +
@@ -854,8 +854,8 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
 
   // ------------------------------------------------------------
   class AkkaDefaultProject(info: ProjectInfo, val deployPath: Path) extends DefaultProject(info) with DeployProject with OSGiProject {
-    lazy val sourceArtifact = Artifact(this.artifactID, "sources", "jar", Some("sources"), Nil, None)
-    lazy val docsArtifact = Artifact(this.artifactID, "docs", "jar", Some("docs"), Nil, None)
+    lazy val sourceArtifact = Artifact(this.artifactID, "src", "jar", Some("sources"), Nil, None)
+    lazy val docsArtifact = Artifact(this.artifactID, "doc", "jar", Some("docs"), Nil, None)
     override def runClasspath = super.runClasspath +++ (AkkaParentProject.this.info.projectPath / "config")
     override def testClasspath = super.testClasspath +++ (AkkaParentProject.this.info.projectPath / "config")
     override def packageDocsJar = this.defaultJarPath("-docs.jar")
