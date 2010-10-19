@@ -29,11 +29,36 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
   // -------------------------------------------------------------------------------------------------------------------
   // Deploy/dist settings
   // -------------------------------------------------------------------------------------------------------------------
-
+  def distName = "%s_%s-%s".format(name, buildScalaVersion, version)
   lazy val deployPath = info.projectPath / "deploy"
   lazy val distPath = info.projectPath / "dist"
-  def distName = "%s_%s-%s.zip".format(name, buildScalaVersion, version)
-  lazy val dist = zipTask(allArtifacts, "dist", distName) dependsOn (`package`) describedAs("Zips up the distribution.")
+
+  //The distribution task, packages Akka into a zipfile and places it into the projectPath/dist directory
+  lazy val dist = task {
+
+    def transferFile(from: Path, to: Path) =
+      if ( from.asFile.renameTo(to.asFile) ) None
+      else Some("Couldn't transfer %s to %s".format(from,to))
+
+    //Creates a temporary directory where we can assemble the distribution
+    val genDistDir = Path.fromFile({
+      val d = File.createTempFile("akka","dist")
+      d.delete //delete the file
+      d.mkdir  //Recreate it as a dir
+      d
+    }).## //## is needed to make sure that the zipped archive has the correct root folder
+
+    //Temporary directory to hold the dist currently being generated
+    val currentDist = genDistDir / distName
+    //ArchiveName = name of the zip file distribution that will be generated
+    val archiveName = distName + ".zip"
+
+    FileUtilities.copy(allArtifacts.get, currentDist, log).left.toOption orElse //Copy all needed artifacts into the root archive
+    FileUtilities.zip(List(currentDist),distName + ".zip",true,log) orElse //Compress the root archive into a zipfile
+    transferFile(info.projectPath / archiveName,distPath / archiveName) orElse //Move the archive into the dist folder
+    FileUtilities.clean(genDistDir,log) //Cleanup the generated jars
+
+  } dependsOn (`package`) describedAs("Zips up the distribution.")
 
   // -------------------------------------------------------------------------------------------------------------------
   // All repositories *must* go here! See ModuleConigurations below.
@@ -192,7 +217,7 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
 
     lazy val rabbit = "com.rabbitmq" % "amqp-client" % "1.8.1" % "compile"
 
-    lazy val redis = "com.redis" % "redisclient" % "2.8.0-2.0.1" % "compile"
+    lazy val redis = "com.redis" % "redisclient" % "2.8.0-2.0.2" % "compile"
 
     lazy val sbinary = "sbinary" % "sbinary" % "2.8.0-0.3.1" % "compile"
 
@@ -223,6 +248,9 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     lazy val hadoop_core = "org.apache.hadoop" % "hadoop-core" % "0.20.2" % "compile"
 
     lazy val hbase_core = "org.apache.hbase" % "hbase-core" % "0.20.6" % "compile"
+
+    //Riak PB Client
+    lazy val riak_pb_client = "com.trifork"   %  "riak-java-pb-client"      % "1.0-for-akka-by-ticktock"  % "compile"
 
     // Test
 
@@ -304,6 +332,9 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     " dist/akka-persistence-redis_%s-%s.jar".format(buildScalaVersion, version) +
     " dist/akka-persistence-mongo_%s-%s.jar".format(buildScalaVersion, version) +
     " dist/akka-persistence-cassandra_%s-%s.jar".format(buildScalaVersion, version) +
+    " dist/akka-persistence-voldemort_%s-%s.jar".format(buildScalaVersion, version) +
+    " dist/akka-persistence-riak_%s-%s.jar".format(buildScalaVersion, version) +
+    " dist/akka-persistence-hbase_%s-%s.jar".format(buildScalaVersion, version) +
     " dist/akka-kernel_%s-%s.jar".format(buildScalaVersion, version) +
     " dist/akka-spring_%s-%s.jar".format(buildScalaVersion, version) +
     " dist/akka-jta_%s-%s.jar".format(buildScalaVersion, version)
@@ -504,6 +535,8 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
       new AkkaHbaseProject(_), akka_persistence_common)
     lazy val akka_persistence_voldemort = project("akka-persistence-voldemort", "akka-persistence-voldemort",
       new AkkaVoldemortProject(_), akka_persistence_common)
+    lazy val akka_persistence_riak = project("akka-persistence-riak", "akka-persistence-riak",
+      new AkkaRiakProject(_), akka_persistence_common)
     lazy val akka_persistence_couchdb = project("akka-persistence-couchdb", "akka-persistence-couchdb",
       new AkkaCouchDBProject(_), akka_persistence_common)
   }
@@ -604,6 +637,19 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     val sjson = Dependencies.sjson_test
 
     override def testOptions = createTestFilter({ s:String=> s.endsWith("Suite") || s.endsWith("Test")})
+  }
+
+// akka-persistence-riak subproject
+  // -------------------------------------------------------------------------------------------------------------------
+
+  class AkkaRiakProject(info: ProjectInfo) extends AkkaDefaultProject(info, distPath) {
+    val riak_pb = Dependencies.riak_pb_client
+    val protobuf = Dependencies.protobuf
+    //testing
+    val scalatest = Dependencies.scalatest
+
+
+    override def testOptions = createTestFilter(_.endsWith("Test"))
   }
 
   class AkkaCouchDBProject(info: ProjectInfo) extends AkkaDefaultProject(info, distPath) {
