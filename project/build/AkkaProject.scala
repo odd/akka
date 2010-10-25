@@ -703,7 +703,7 @@ class AkkaParentProject(info: ProjectInfo) extends DefaultProject(info) {
     lazy val akka_osgi_dependencies_bundle = project("akka-osgi-dependencies-bundle", "akka-osgi-dependencies-bundle",
       new AkkaOSGiDependenciesBundleProject(_), akka_kernel, akka_jta) // akka_kernel does not depend on akka_jta (why?) therefore we list akka_jta here
     lazy val akka_osgi_assembly = project("akka-osgi-assembly", "akka-osgi-assembly",
-      new AkkaOSGiAssemblyProject(_), akka_osgi_dependencies_bundle, akka_remote, akka_amqp, akka_http,
+      new AkkaOSGiAssemblyProject(_), akka_osgi_dependencies_bundle, akka_actor, akka_typed_actor, akka_remote, akka_amqp, akka_http,
         akka_camel, akka_spring, akka_jta, akka_persistence.akka_persistence_common,
         akka_persistence.akka_persistence_redis, akka_persistence.akka_persistence_mongo,
         akka_persistence.akka_persistence_cassandra,akka_persistence.akka_persistence_hbase,
