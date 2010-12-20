@@ -1,7 +1,10 @@
 package sample.fsm.dining.fsm
 
 import akka.actor.{ActorRef, Actor, FSM}
+import akka.actor.FSM._
 import Actor._
+import java.util.concurrent.TimeUnit
+import TimeUnit._
 
 /*
  * Some messages for the chopstick
@@ -31,7 +34,7 @@ class Chopstick(name: String) extends Actor with FSM[ChopstickState, TakenBy] {
   self.id = name
 
   // When a chopstick is available, it can be taken by a some hakker
-  inState(Available) {
+  when(Available) {
     case Event(Take, _) =>
       goto(Taken) using TakenBy(self.sender) replying Taken(self)
   }
@@ -39,7 +42,7 @@ class Chopstick(name: String) extends Actor with FSM[ChopstickState, TakenBy] {
   // When a chopstick is taken by a hakker
   // It will refuse to be taken by other hakkers
   // But the owning hakker can put it back
-  inState(Taken) {
+  when(Taken) {
     case Event(Take, currentState) =>
       stay replying Busy(self)
     case Event(Put, TakenBy(hakker)) if self.sender == hakker =>
@@ -47,7 +50,7 @@ class Chopstick(name: String) extends Actor with FSM[ChopstickState, TakenBy] {
   }
 
   // A chopstick begins its existence as available and taken by no one
-  setInitialState(Available, TakenBy(None))
+  startWith(Available, TakenBy(None))
 }
 
 /**
@@ -78,15 +81,15 @@ case class TakenChopsticks(left: Option[ActorRef], right: Option[ActorRef])
 class FSMHakker(name: String, left: ActorRef, right: ActorRef) extends Actor with FSM[FSMHakkerState, TakenChopsticks] {
   self.id = name
 
-  inState(Waiting) {
+  when(Waiting) {
     case Event(Think, _) =>
       log.info("%s starts to think", name)
-      startThinking(5000)
+      startThinking(5, SECONDS)
   }
 
   //When a hakker is thinking it can become hungry
   //and try to pick up its chopsticks and eat
-  inState(Thinking) {
+  when(Thinking) {
     case Event(StateTimeout, _) =>
       left ! Take
       right ! Take
@@ -97,7 +100,7 @@ class FSMHakker(name: String, left: ActorRef, right: ActorRef) extends Actor wit
   // When it picks one up, it goes into wait for the other
   // If the hakkers first attempt at grabbing a chopstick fails,
   // it starts to wait for the response of the other grab
-  inState(Hungry) {
+  when(Hungry) {
     case Event(Taken(`left`), _) =>
       goto(WaitForOtherChopstick) using TakenChopsticks(Some(left), None)
     case Event(Taken(`right`), _) =>
@@ -109,47 +112,47 @@ class FSMHakker(name: String, left: ActorRef, right: ActorRef) extends Actor wit
   // When a hakker is waiting for the last chopstick it can either obtain it
   // and start eating, or the other chopstick was busy, and the hakker goes
   // back to think about how he should obtain his chopsticks :-)
-  inState(WaitForOtherChopstick) {
+  when(WaitForOtherChopstick) {
     case Event(Taken(`left`), TakenChopsticks(None, Some(right))) => startEating(left, right)
     case Event(Taken(`right`), TakenChopsticks(Some(left), None)) => startEating(left, right)
     case Event(Busy(chopstick), TakenChopsticks(leftOption, rightOption)) =>
       leftOption.foreach(_ ! Put)
       rightOption.foreach(_ ! Put)
-      startThinking(10)
+      startThinking(10, MILLISECONDS)
   }
 
   private def startEating(left: ActorRef, right: ActorRef): State = {
     log.info("%s has picked up %s and %s, and starts to eat", name, left.id, right.id)
-    goto(Eating) using TakenChopsticks(Some(left), Some(right)) until 5000
+    goto(Eating) using TakenChopsticks(Some(left), Some(right)) forMax (5, SECONDS)
   }
 
   // When the results of the other grab comes back,
   // he needs to put it back if he got the other one.
   // Then go back and think and try to grab the chopsticks again
-  inState(FirstChopstickDenied) {
+  when(FirstChopstickDenied) {
     case Event(Taken(secondChopstick), _) =>
       secondChopstick ! Put
-      startThinking(10)
+      startThinking(10, MILLISECONDS)
     case Event(Busy(chopstick), _) =>
-      startThinking(10)
+      startThinking(10, MILLISECONDS)
   }
 
   // When a hakker is eating, he can decide to start to think,
   // then he puts down his chopsticks and starts to think
-  inState(Eating) {
+  when(Eating) {
     case Event(StateTimeout, _) =>
       log.info("%s puts down his chopsticks and starts to think", name)
       left ! Put
       right ! Put
-      startThinking(5000)
+      startThinking(5, SECONDS)
   }
 
-  private def startThinking(period: Int): State = {
-    goto(Thinking) using TakenChopsticks(None, None) until period
+  private def startThinking(period: Int, timeUnit: TimeUnit): State = {
+    goto(Thinking) using TakenChopsticks(None, None) forMax (period, timeUnit)
   }
 
   //All hakkers start waiting
-  setInitialState(Waiting, TakenChopsticks(None, None))
+  startWith(Waiting, TakenChopsticks(None, None))
 }
 
 /*

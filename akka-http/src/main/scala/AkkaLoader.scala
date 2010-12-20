@@ -5,13 +5,14 @@
 package akka.servlet
 
 import akka.config.Config
-import akka.util.{Logging, Bootable}
+import akka.actor.Actor
+import akka.util. {Switch, Logging, Bootable}
 
 /*
  * This class is responsible for booting up a stack of bundles and then shutting them down
  */
 class AkkaLoader extends Logging {
-  @volatile private var hasBooted = false
+  private val hasBooted = new Switch(false)
 
   @volatile private var _bundles: Option[Bootable] = None
 
@@ -20,56 +21,52 @@ class AkkaLoader extends Logging {
   /*
    * Boot initializes the specified bundles
    */
-  def boot(withBanner: Boolean, b : Bootable): Unit = synchronized {
-    if (!hasBooted) {
-      if (withBanner) printBanner
-      log.info("Starting Akka...")
-      b.onLoad
-      Thread.currentThread.setContextClassLoader(getClass.getClassLoader)
-      log.info("Akka started successfully")
-      hasBooted = true
-      _bundles = Some(b)
-    }
+  def boot(withBanner: Boolean, b : Bootable): Unit = hasBooted switchOn {
+    if (withBanner) printBanner
+    log.slf4j.info("Starting Akka...")
+    b.onLoad
+    Thread.currentThread.setContextClassLoader(getClass.getClassLoader)
+    _bundles = Some(b)
+    log.slf4j.info("Akka started successfully")
   }
 
   /*
    * Shutdown, well, shuts down the bundles used in boot
    */
-  def shutdown = synchronized {
-    if (hasBooted) {
-      log.info("Shutting down Akka...")
-      _bundles.foreach(_.onUnload)
-      _bundles = None
-      log.info("Akka succesfully shut down")
-    }
+  def shutdown: Unit = hasBooted switchOff {
+    log.slf4j.info("Shutting down Akka...")
+    _bundles.foreach(_.onUnload)
+    _bundles = None
+    Actor.shutdownHook.run
+    log.slf4j.info("Akka succesfully shut down")
   }
 
   private def printBanner = {
-    log.info("==================================================")
-    log.info("                       t")
-    log.info("             t       t t")
-    log.info("            t       t tt   t")
-    log.info("        tt  t   t  tt       t")
-    log.info("       t ttttttt  t      ttt t")
-    log.info("      t   tt ttt t       ttt  t")
-    log.info("     t     t ttt    t    ttt   t      t")
-    log.info("    tt    t  ttt         ttt    ttt    t")
-    log.info("   t     t   ttt         ttt     t tt  t")
-    log.info("   t         ttt         ttt      t     t")
-    log.info(" tt          ttt         ttt              t")
-    log.info("             ttt         ttt")
-    log.info("   tttttttt  ttt    ttt  ttt    ttt  tttttttt")
-    log.info("  ttt    tt  ttt    ttt  ttt    ttt ttt    ttt")
-    log.info("  ttt    ttt ttt    ttt  ttt    ttt ttt    ttt")
-    log.info("  ttt    ttt ttt    ttt  ttt    tt  ttt    ttt")
-    log.info("        tttt ttttttttt   tttttttt         tttt")
-    log.info("   ttttttttt ttt    ttt  ttt   ttt   ttttttttt")
-    log.info("  ttt    ttt ttt    ttt  ttt    ttt ttt    ttt")
-    log.info("  ttt    ttt ttt    ttt  ttt    ttt ttt    ttt")
-    log.info("  ttt    tt  ttt    ttt  ttt    ttt ttt    ttt")
-    log.info("   tttttttt  ttt    ttt  ttt    ttt  tttttttt")
-    log.info("==================================================")
-    log.info("            Running version %s", Config.VERSION)
-    log.info("==================================================")
+    log.slf4j.info("==================================================")
+    log.slf4j.info("                       t")
+    log.slf4j.info("             t       t t")
+    log.slf4j.info("            t       t tt   t")
+    log.slf4j.info("        tt  t   t  tt       t")
+    log.slf4j.info("       t ttttttt  t      ttt t")
+    log.slf4j.info("      t   tt ttt t       ttt  t")
+    log.slf4j.info("     t     t ttt    t    ttt   t      t")
+    log.slf4j.info("    tt    t  ttt         ttt    ttt    t")
+    log.slf4j.info("   t     t   ttt         ttt     t tt  t")
+    log.slf4j.info("   t         ttt         ttt      t     t")
+    log.slf4j.info(" tt          ttt         ttt              t")
+    log.slf4j.info("             ttt         ttt")
+    log.slf4j.info("   tttttttt  ttt    ttt  ttt    ttt  tttttttt")
+    log.slf4j.info("  ttt    tt  ttt    ttt  ttt    ttt ttt    ttt")
+    log.slf4j.info("  ttt    ttt ttt    ttt  ttt    ttt ttt    ttt")
+    log.slf4j.info("  ttt    ttt ttt    ttt  ttt    tt  ttt    ttt")
+    log.slf4j.info("        tttt ttttttttt   tttttttt         tttt")
+    log.slf4j.info("   ttttttttt ttt    ttt  ttt   ttt   ttttttttt")
+    log.slf4j.info("  ttt    ttt ttt    ttt  ttt    ttt ttt    ttt")
+    log.slf4j.info("  ttt    ttt ttt    ttt  ttt    ttt ttt    ttt")
+    log.slf4j.info("  ttt    tt  ttt    ttt  ttt    ttt ttt    ttt")
+    log.slf4j.info("   tttttttt  ttt    ttt  ttt    ttt  tttttttt")
+    log.slf4j.info("==================================================")
+    log.slf4j.info("            Running version {}", Config.VERSION)
+    log.slf4j.info("==================================================")
   }
 }

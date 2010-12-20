@@ -3,6 +3,7 @@ package akka.actor.remote
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import org.scalatest.junit.JUnitSuite
 import org.junit.{Test, Before, After}
+import akka.util._
 
 import akka.remote.{RemoteServer, RemoteClient}
 import akka.actor.Actor._
@@ -194,7 +195,7 @@ class ServerInitiatedRemoteActorSpec extends JUnitSuite {
     ref1.stop
     ref2 ! "OneWay"
     ref2.stop
-    
+
   }
 
   @Test

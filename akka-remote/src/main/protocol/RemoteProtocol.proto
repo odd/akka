@@ -12,6 +12,21 @@ option optimize_for = SPEED;
 *******************************************/
 
 /**
+ * Defines a remote message.
+ */
+message RemoteMessageProtocol {
+  required UuidProtocol uuid = 1;
+  required ActorInfoProtocol actorInfo = 2;
+  required bool oneWay = 3;
+  optional MessageProtocol message = 4;
+  optional ExceptionProtocol exception = 5;
+  optional UuidProtocol supervisorUuid = 6;
+  optional RemoteActorRefProtocol sender = 7;
+  repeated MetadataEntryProtocol metadata = 8;
+  optional string cookie = 9;
+}
+
+/**
  * Defines a remote ActorRef that "remembers" and uses its original Actor instance
  * on the original node.
  */
@@ -43,13 +58,12 @@ message SerializedActorRefProtocol {
   required AddressProtocol originalAddress  = 4;
   optional bytes actorInstance = 5;
   optional string serializerClassname = 6;
-  optional bool isTransactor = 7;
-  optional uint64 timeout = 8;
-  optional uint64 receiveTimeout = 9;
-  optional LifeCycleProtocol lifeCycle = 10;
-  optional RemoteActorRefProtocol supervisor = 11;
-  optional bytes hotswapStack = 12;
-  repeated RemoteRequestProtocol messages = 13;
+  optional uint64 timeout = 7;
+  optional uint64 receiveTimeout = 8;
+  optional LifeCycleProtocol lifeCycle = 9;
+  optional RemoteActorRefProtocol supervisor = 10;
+  optional bytes hotswapStack = 11;
+  repeated RemoteMessageProtocol messages = 12;
 }
 
 /**
@@ -89,41 +103,6 @@ message ActorInfoProtocol {
 message TypedActorInfoProtocol {
   required string interface = 1;
   required string method = 2;
-}
-
-/**
- * Defines a remote connection handshake.
- */
-//message HandshakeProtocol {
-//  required string cookie = 1;
-//}
-
-/**
- * Defines a remote message request.
- */
-message RemoteRequestProtocol {
-  required UuidProtocol uuid = 1;
-  required MessageProtocol message = 2;
-  required ActorInfoProtocol actorInfo = 3;
-  required bool isOneWay = 4;
-  optional UuidProtocol supervisorUuid = 5;
-  optional RemoteActorRefProtocol sender = 6;
-  repeated MetadataEntryProtocol metadata = 7;
-  optional string cookie = 8;
-}
-
-/**
- * Defines a remote message reply.
- */
-message RemoteReplyProtocol {
-  required UuidProtocol uuid = 1;
-  optional MessageProtocol message = 2;
-  optional ExceptionProtocol exception = 3;
-  optional UuidProtocol supervisorUuid = 4;
-  required bool isActor = 5;
-  required bool isSuccessful = 6;
-  repeated MetadataEntryProtocol metadata = 7;
-  optional string cookie = 8;
 }
 
 /**
