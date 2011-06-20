@@ -3,14 +3,29 @@ package akka.japi
 /**
  * A Function interface. Used to create first-class-functions is Java (sort of).
  */
-trait Function[T,R] {
+trait Function[T, R] {
   def apply(param: T): R
 }
 
-/** A Procedure is like a Function, but it doesn't produce a return value
+/**
+ * A Function interface. Used to create 2-arg first-class-functions is Java (sort of).
+ */
+trait Function2[T1, T2, R] {
+  def apply(arg1: T1, arg2: T2): R
+}
+
+/**
+ * A Procedure is like a Function, but it doesn't produce a return value
  */
 trait Procedure[T] {
   def apply(param: T): Unit
+}
+
+/**
+ * A Procedure is like a Function, but it doesn't produce a return value
+ */
+trait Procedure2[T1, T2] {
+  def apply(param: T1, param2: T2): Unit
 }
 
 /**
@@ -28,12 +43,12 @@ trait Effect {
 }
 
 /**
- + * A constructor/factory, takes no parameters but creates a new value of type T every call
- + */
+ * + * A constructor/factory, takes no parameters but creates a new value of type T every call
+ * +
+ */
 trait Creator[T] {
   def create: T
 }
-
 
 /**
  * This class represents optional values. Instances of <code>Option</code>

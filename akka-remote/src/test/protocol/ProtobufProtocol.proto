@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
  */
 
 package akka.actor;
@@ -10,17 +10,9 @@ package akka.actor;
   protoc ProtobufProtocol.proto --java_out ../java
 */
 
-message ProtobufPOJO {
+message MyMessage {
   required uint64 id = 1;
   required string name = 2;
   required bool status = 3;
 }
 
-message Counter {
-  required uint32 count = 1;
-}
-
-message DualCounter {
-  required uint32 count1 = 1;
-  required uint32 count2 = 2;
-}

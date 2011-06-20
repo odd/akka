@@ -1,12 +1,12 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
  */
 
 package akka.stm
 
-import org.multiverse.api.{StmUtils => MultiverseStmUtils}
-import org.multiverse.api.{Transaction => MultiverseTransaction}
-import org.multiverse.templates.{TransactionalCallable, OrElseTemplate}
+import org.multiverse.api.{ StmUtils ⇒ MultiverseStmUtils }
+import org.multiverse.api.{ Transaction ⇒ MultiverseTransaction }
+import org.multiverse.templates.{ TransactionalCallable, OrElseTemplate }
 
 object Stm {
   /**
@@ -43,15 +43,12 @@ object Stm {
 trait Stm {
   val DefaultTransactionFactory = TransactionFactory(DefaultTransactionConfig, "DefaultTransaction")
 
-  def atomic[T](body: => T)(implicit factory: TransactionFactory = DefaultTransactionFactory): T =
+  def atomic[T](body: ⇒ T)(implicit factory: TransactionFactory = DefaultTransactionFactory): T =
     atomic(factory)(body)
 
-  def atomic[T](factory: TransactionFactory)(body: => T): T = {
+  def atomic[T](factory: TransactionFactory)(body: ⇒ T): T = {
     factory.boilerplate.execute(new TransactionalCallable[T]() {
-      def call(mtx: MultiverseTransaction): T = {
-        factory.addHooks
-        body
-      }
+      def call(mtx: MultiverseTransaction): T = body
     })
   }
 }
@@ -118,14 +115,14 @@ trait StmUtil {
    * Schedule a deferred task on the thread local transaction (use within an atomic).
    * This is executed when the transaction commits.
    */
-  def deferred[T](body: => T): Unit =
+  def deferred[T](body: ⇒ T): Unit =
     MultiverseStmUtils.scheduleDeferredTask(new Runnable { def run = body })
 
   /**
    * Schedule a compensating task on the thread local transaction (use within an atomic).
    * This is executed when the transaction aborts.
    */
-  def compensating[T](body: => T): Unit =
+  def compensating[T](body: ⇒ T): Unit =
     MultiverseStmUtils.scheduleCompensatingTask(new Runnable { def run = body })
 
   /**
@@ -137,13 +134,44 @@ trait StmUtil {
   /**
    * Use either-orElse to combine two blocking transactions.
    */
-  def either[T](firstBody: => T) = new {
-    def orElse(secondBody: => T) = new OrElseTemplate[T] {
+  def either[T](firstBody: ⇒ T) = new {
+    def orElse(secondBody: ⇒ T) = new OrElseTemplate[T] {
       def either(mtx: MultiverseTransaction) = firstBody
       def orelse(mtx: MultiverseTransaction) = secondBody
     }.execute()
   }
 }
 
+/**
+ * Stm utility methods for using from Java.
+ */
+object StmUtils {
+  /**
+   * Schedule a deferred task on the thread local transaction (use within an atomic).
+   * This is executed when the transaction commits.
+   */
+  def deferred(runnable: Runnable): Unit = MultiverseStmUtils.scheduleDeferredTask(runnable)
 
+  /**
+   * Schedule a compensating task on the thread local transaction (use within an atomic).
+   * This is executed when the transaction aborts.
+   */
+  def compensating(runnable: Runnable): Unit = MultiverseStmUtils.scheduleCompensatingTask(runnable)
 
+  /**
+   * STM retry for blocking transactions (use within an atomic).
+   * Can be used to wait for a condition.
+   */
+  def retry = MultiverseStmUtils.retry
+}
+
+/**
+ * Use EitherOrElse to combine two blocking transactions (from Java).
+ */
+abstract class EitherOrElse[T] extends OrElseTemplate[T] {
+  def either(mtx: MultiverseTransaction) = either
+  def orelse(mtx: MultiverseTransaction) = orElse
+
+  def either: T
+  def orElse: T
+}

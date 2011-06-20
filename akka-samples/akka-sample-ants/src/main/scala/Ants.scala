@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
  */
 
 package sample.ants
@@ -65,9 +65,9 @@ object World {
   val homeOff = Dim / 4
   lazy val places = Vector.fill(Dim, Dim)(new Place)
   lazy val ants = setup
-  lazy val evaporator = actorOf[Evaporator].start
+  lazy val evaporator = actorOf[Evaporator].start()
 
-  private val snapshotFactory = TransactionFactory(readonly = true, familyName = "snapshot", hooks = false)
+  private val snapshotFactory = TransactionFactory(readonly = true, familyName = "snapshot")
 
   def snapshot = atomic(snapshotFactory) { Array.tabulate(Dim, Dim)(place(_, _).opt) }
 
@@ -81,7 +81,7 @@ object World {
     for (x <- homeRange; y <- homeRange) yield {
       place(x, y).makeHome
       place(x, y) enter Ant(randomInt(8))
-      actorOf(new AntActor(x, y)).start
+      actorOf(new AntActor(x, y)).start()
     }
   }
 
@@ -138,7 +138,7 @@ class AntActor(initLoc: (Int, Int)) extends WorldActor {
   val locRef = Ref(initLoc)
 
   val name = "ant-from-" + initLoc._1 + "-" + initLoc._2
-  implicit val txFactory = TransactionFactory(familyName = name, hooks = false)
+  implicit val txFactory = TransactionFactory(familyName = name)
 
   val homing = (p: Place) => p.pher + (100 * (if (p.home) 0 else 1))
   val foraging = (p: Place) => p.pher + p.food
@@ -210,7 +210,7 @@ class Evaporator extends WorldActor {
   import Config._
   import World._
 
-  implicit val txFactory = TransactionFactory(familyName = "evaporator", hooks = false)
+  implicit val txFactory = TransactionFactory(familyName = "evaporator")
   val evaporate = (pher: Float) => pher * EvapRate
 
   def act = for (x <- 0 until Dim; y <- 0 until Dim) {

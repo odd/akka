@@ -2,12 +2,12 @@ package akka.transactor.example;
 
 import akka.transactor.Coordinated;
 import akka.transactor.Atomically;
-import akka.actor.ActorRef;
+import akka.actor.Actors;
 import akka.actor.UntypedActor;
 import akka.stm.Ref;
 
 public class UntypedCoordinatedCounter extends UntypedActor {
-    private Ref<Integer> count = new Ref(0);
+    private Ref<Integer> count = new Ref<Integer>(0);
 
     private void increment() {
         System.out.println("incrementing");

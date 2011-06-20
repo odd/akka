@@ -1,19 +1,18 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
  */
 
 package akka.util
 
 import java.util.concurrent.ConcurrentSkipListSet
-
-import akka.actor.ActorRef
+import akka.actor.{ ActorInitializationException, ActorRef }
 
 /**
  * A manager for listener actors. Intended for mixin by observables.
  *
  * @author Martin Krasser
  */
-trait ListenerManagement extends Logging {
+trait ListenerManagement {
 
   private val listeners = new ConcurrentSkipListSet[ActorRef]
 
@@ -27,7 +26,7 @@ trait ListenerManagement extends Logging {
    * The <code>listener</code> is started by this method if manageLifeCycleOfListeners yields true.
    */
   def addListener(listener: ActorRef) {
-    if (manageLifeCycleOfListeners) listener.start
+    if (manageLifeCycleOfListeners) listener.start()
     listeners add listener
   }
 
@@ -37,7 +36,7 @@ trait ListenerManagement extends Logging {
    */
   def removeListener(listener: ActorRef) {
     listeners remove listener
-    if (manageLifeCycleOfListeners) listener.stop
+    if (manageLifeCycleOfListeners) listener.stop()
   }
 
   /*
@@ -46,31 +45,37 @@ trait ListenerManagement extends Logging {
   def hasListeners: Boolean = !listeners.isEmpty
 
   /**
-   * Checks if a specfic listener is registered.
+   * Checks if a specific listener is registered. ActorInitializationException leads to removal of listener if that
+   * one isShutdown.
    */
   def hasListener(listener: ActorRef): Boolean = listeners.contains(listener)
 
-  protected def notifyListeners(message: => Any) {
+  protected[akka] def notifyListeners(message: ⇒ Any) {
     if (hasListeners) {
       val msg = message
       val iterator = listeners.iterator
       while (iterator.hasNext) {
         val listener = iterator.next
-        if (listener.isRunning) listener ! msg
-        else log.slf4j.warn("Can't notify [{}] since it is not running.", listener)
+        // Uncomment if those exceptions are so frequent as to bottleneck
+        // if (listener.isShutdown) iterator.remove() else
+        try {
+          listener ! msg
+        } catch {
+          case e: ActorInitializationException ⇒
+            if (listener.isShutdown) iterator.remove()
+        }
       }
     }
   }
 
   /**
-   * Execute <code>f</code> with each listener as argument.
+   * Execute <code>f</code> with each listener as argument. ActorInitializationException is not handled.
    */
-  protected def foreachListener(f: (ActorRef) => Unit) {
+  protected[akka] def foreachListener(f: (ActorRef) ⇒ Unit) {
     val iterator = listeners.iterator
     while (iterator.hasNext) {
       val listener = iterator.next
       if (listener.isRunning) f(listener)
-      else log.slf4j.warn("Can't notify [{}] since it is not running.", listener)
     }
   }
 }

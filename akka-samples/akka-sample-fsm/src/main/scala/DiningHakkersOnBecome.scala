@@ -22,7 +22,6 @@ object Think extends DiningHakkerMessage
  * A Chopstick is an actor, it can be taken, and put back
  */
 class Chopstick(name: String) extends Actor {
-  self.id = name
 
   //When a Chopstick is taken by a hakker
   //It will refuse to be taken by other hakkers
@@ -49,7 +48,6 @@ class Chopstick(name: String) extends Actor {
  * A hakker is an awesome dude or dudett who either thinks about hacking or has to eat ;-)
  */
 class Hakker(name: String,left: ActorRef, right: ActorRef) extends Actor {
-  self.id = name
 
   //When a hakker is thinking it can become hungry
   //and try to pick up its chopsticks and eat
@@ -78,7 +76,7 @@ class Hakker(name: String,left: ActorRef, right: ActorRef) extends Actor {
   //back to think about how he should obtain his chopsticks :-)
   def waiting_for(chopstickToWaitFor: ActorRef, otherChopstick: ActorRef): Receive = {
     case Taken(`chopstickToWaitFor`) =>
-      log.info("%s has picked up %s and %s, and starts to eat",name,left.id,right.id)
+      println("%s has picked up %s and %s, and starts to eat",name,left.address,right.address)
       become(eating)
       Scheduler.scheduleOnce(self,Think,5,TimeUnit.SECONDS)
 
@@ -108,14 +106,14 @@ class Hakker(name: String,left: ActorRef, right: ActorRef) extends Actor {
       become(thinking)
        left ! Put(self)
       right ! Put(self)
-      log.info("%s puts down his chopsticks and starts to think",name)
+      println("%s puts down his chopsticks and starts to think",name)
       Scheduler.scheduleOnce(self,Eat,5,TimeUnit.SECONDS)
   }
 
   //All hakkers start in a non-eating state
   def receive = {
     case Think =>
-      log.info("%s starts to think",name)
+      println("%s starts to think",name)
       become(thinking)
       Scheduler.scheduleOnce(self,Eat,5,TimeUnit.SECONDS)
   }
@@ -127,11 +125,11 @@ class Hakker(name: String,left: ActorRef, right: ActorRef) extends Actor {
 object DiningHakkers {
   def run {
     //Create 5 chopsticks
-    val chopsticks = for(i <- 1 to 5) yield actorOf(new Chopstick("Chopstick "+i)).start
+    val chopsticks = for(i <- 1 to 5) yield actorOf(new Chopstick("Chopstick "+i)).start()
     //Create 5 awesome hakkers and assign them their left and right chopstick
     val hakkers = for {
       (name,i) <- List("Ghosh","Bonér","Klang","Krasser","Manie").zipWithIndex
-    } yield actorOf(new Hakker(name,chopsticks(i),chopsticks((i+1) % 5))).start
+    } yield actorOf(new Hakker(name,chopsticks(i),chopsticks((i+1) % 5))).start()
 
     //Signal all hakkers that they should start thinking, and watch the show
     hakkers.foreach(_ ! Think)

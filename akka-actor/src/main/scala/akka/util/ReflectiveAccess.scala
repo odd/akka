@@ -1,13 +1,17 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
  */
 
 package akka.util
 
-import akka.actor.{ActorRef, IllegalActorStateException, ActorType, Uuid}
-import akka.dispatch.{Future, CompletableFuture, MessageInvocation}
-import akka.config.{Config, ModuleNotAvailableException}
-import akka.AkkaException
+import akka.dispatch.{ Future, Promise, MessageInvocation }
+import akka.config.{ Config, ModuleNotAvailableException }
+import akka.remoteinterface.RemoteSupport
+import akka.actor._
+import DeploymentConfig.{ Deploy, ReplicationScheme, ReplicationStrategy }
+import akka.event.EventHandler
+import akka.serialization.Format
+import akka.cluster.ClusterNode
 
 import java.net.InetSocketAddress
 
@@ -16,162 +20,82 @@ import java.net.InetSocketAddress
  *
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
-object ReflectiveAccess extends Logging {
+object ReflectiveAccess {
 
   val loader = getClass.getClassLoader
 
-  lazy val isRemotingEnabled   = RemoteClientModule.isEnabled
-  lazy val isTypedActorEnabled = TypedActorModule.isEnabled
-
-  def ensureRemotingEnabled   = RemoteClientModule.ensureEnabled
-  def ensureTypedActorEnabled = TypedActorModule.ensureEnabled
-
   /**
-   * Reflective access to the RemoteClient module.
+   * Reflective access to the Cluster module.
    *
    * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
    */
-  object RemoteClientModule {
+  object ClusterModule {
+    lazy val isEnabled = clusterInstance.isDefined
 
-    type RemoteClient = {
-      def send[T](
-        message: Any,
-        senderOption: Option[ActorRef],
-        senderFuture: Option[CompletableFuture[_]],
-        remoteAddress: InetSocketAddress,
-        timeout: Long,
-        isOneWay: Boolean,
-        actorRef: ActorRef,
-        typedActorInfo: Option[Tuple2[String, String]],
-        actorType: ActorType): Option[CompletableFuture[T]]
-      def registerSupervisorForActor(actorRef: ActorRef)
-    }
-
-    type RemoteClientObject = {
-      def register(hostname: String, port: Int, uuid: Uuid): Unit
-      def unregister(hostname: String, port: Int, uuid: Uuid): Unit
-      def clientFor(address: InetSocketAddress): RemoteClient
-      def clientFor(hostname: String, port: Int, loader: Option[ClassLoader]): RemoteClient
-    }
-
-    lazy val isEnabled = remoteClientObjectInstance.isDefined
-
-    def ensureEnabled = if (!isEnabled) throw new ModuleNotAvailableException(
-      "Can't load the remoting module, make sure that akka-remote.jar is on the classpath")
-
-    val remoteClientObjectInstance: Option[RemoteClientObject] =
-      getObjectFor("akka.remote.RemoteClient$")
-
-    def register(address: InetSocketAddress, uuid: Uuid) = {
-      ensureEnabled
-      remoteClientObjectInstance.get.register(address.getHostName, address.getPort, uuid)
-    }
-
-    def unregister(address: InetSocketAddress, uuid: Uuid) = {
-      ensureEnabled
-      remoteClientObjectInstance.get.unregister(address.getHostName, address.getPort, uuid)
-    }
-
-    def registerSupervisorForActor(remoteAddress: InetSocketAddress, actorRef: ActorRef) = {
-      ensureEnabled
-      val remoteClient = remoteClientObjectInstance.get.clientFor(remoteAddress)
-      remoteClient.registerSupervisorForActor(actorRef)
-    }
-
-    def clientFor(hostname: String, port: Int, loader: Option[ClassLoader]): RemoteClient = {
-      ensureEnabled
-      remoteClientObjectInstance.get.clientFor(hostname, port, loader)
-    }
-
-    def send[T](
-      message: Any,
-      senderOption: Option[ActorRef],
-      senderFuture: Option[CompletableFuture[_]],
-      remoteAddress: InetSocketAddress,
-      timeout: Long,
-      isOneWay: Boolean,
-      actorRef: ActorRef,
-      typedActorInfo: Option[Tuple2[String, String]],
-      actorType: ActorType): Option[CompletableFuture[T]] = {
-      ensureEnabled
-      clientFor(remoteAddress.getHostName, remoteAddress.getPort, None).send[T](
-        message, senderOption, senderFuture, remoteAddress, timeout, isOneWay, actorRef, typedActorInfo, actorType)
-    }
-  }
-
-  /**
-   * Reflective access to the RemoteServer module.
-   *
-   * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
-   */
-  object RemoteServerModule {
-    val HOSTNAME = Config.config.getString("akka.remote.server.hostname", "localhost")
-    val PORT     = Config.config.getInt("akka.remote.server.port", 2552)
-
-    type RemoteServerObject = {
-      def registerActor(address: InetSocketAddress, actor: ActorRef): Unit
-      def registerTypedActor(address: InetSocketAddress, name: String, typedActor: AnyRef): Unit
-    }
-
-    type RemoteNodeObject = {
-      def unregister(actorRef: ActorRef): Unit
-    }
-
-    val remoteServerObjectInstance: Option[RemoteServerObject] =
-      getObjectFor("akka.remote.RemoteServer$")
-
-    val remoteNodeObjectInstance: Option[RemoteNodeObject] =
-      getObjectFor("akka.remote.RemoteNode$")
-
-    def registerActor(address: InetSocketAddress, actorRef: ActorRef) = {
-      RemoteClientModule.ensureEnabled
-      remoteServerObjectInstance.get.registerActor(address, actorRef)
-    }
-
-    def registerTypedActor(address: InetSocketAddress, implementationClassName: String, proxy: AnyRef) = {
-      RemoteClientModule.ensureEnabled
-      remoteServerObjectInstance.get.registerTypedActor(address, implementationClassName, proxy)
-    }
-
-    def unregister(actorRef: ActorRef) = {
-      RemoteClientModule.ensureEnabled
-      remoteNodeObjectInstance.get.unregister(actorRef)
-    }
-  }
-
-  /**
-   * Reflective access to the TypedActors module.
-   *
-   * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
-   */
-  object TypedActorModule {
-
-    type TypedActorObject = {
-      def isJoinPoint(message: Any): Boolean
-      def isJoinPointAndOneWay(message: Any): Boolean
-      def actorFor(proxy: AnyRef): Option[ActorRef]
-      def proxyFor(actorRef: ActorRef): Option[AnyRef]
-      def stop(anyRef: AnyRef) : Unit
-    }
-
-    lazy val isEnabled = typedActorObjectInstance.isDefined
-
-    def ensureEnabled = if (!isTypedActorEnabled) throw new ModuleNotAvailableException(
-      "Can't load the typed actor module, make sure that akka-typed-actor.jar is on the classpath")
-
-    val typedActorObjectInstance: Option[TypedActorObject] =
-      getObjectFor("akka.actor.TypedActor$")
-
-    def resolveFutureIfMessageIsJoinPoint(message: Any, future: Future[_]): Boolean = {
-      ensureEnabled
-      if (typedActorObjectInstance.get.isJoinPointAndOneWay(message)) {
-        future.asInstanceOf[CompletableFuture[Option[_]]].completeWithResult(None)
+    def ensureEnabled() {
+      if (!isEnabled) {
+        val e = new ModuleNotAvailableException(
+          "Can't load the cluster module, make sure that akka-cluster.jar is on the classpath")
+        EventHandler.debug(this, e.toString)
+        throw e
       }
-      typedActorObjectInstance.get.isJoinPoint(message)
     }
-  }
 
-  object AkkaCloudModule {
+    lazy val clusterInstance: Option[Cluster] = getObjectFor("akka.cluster.Cluster$") match {
+      case Right(value) ⇒ Some(value)
+      case Left(exception) ⇒
+        EventHandler.debug(this, exception.toString)
+        None
+    }
+
+    lazy val clusterDeployerInstance: Option[ClusterDeployer] = getObjectFor("akka.cluster.ClusterDeployer$") match {
+      case Right(value) ⇒ Some(value)
+      case Left(exception) ⇒
+        EventHandler.debug(this, exception.toString)
+        None
+    }
+
+    lazy val serializerClass: Option[Class[_]] = getClassFor("akka.serialization.Serializer") match {
+      case Right(value) ⇒ Some(value)
+      case Left(exception) ⇒
+        EventHandler.debug(this, exception.toString)
+        None
+    }
+
+    lazy val transactionLogInstance: Option[TransactionLogObject] = getObjectFor("akka.cluster.TransactionLog$") match {
+      case Right(value) ⇒ Some(value)
+      case Left(exception) ⇒
+        EventHandler.debug(this, exception.toString)
+        None
+    }
+
+    lazy val node: ClusterNode = {
+      ensureEnabled()
+      clusterInstance.get.node
+    }
+
+    lazy val clusterDeployer: ClusterDeployer = {
+      ensureEnabled()
+      clusterDeployerInstance.get
+    }
+
+    lazy val transactionLog: TransactionLogObject = {
+      ensureEnabled()
+      transactionLogInstance.get
+    }
+
+    type ClusterDeployer = {
+      def init(deployments: List[Deploy])
+      def shutdown()
+      def deploy(deployment: Deploy)
+      def undeploy(deployment: Deploy)
+      def undeployAll()
+      def lookupDeploymentFor(address: String): Option[Deploy]
+    }
+
+    type Cluster = {
+      def node: ClusterNode
+    }
 
     type Mailbox = {
       def enqueue(message: MessageInvocation)
@@ -183,94 +107,171 @@ object ReflectiveAccess extends Logging {
       def fromBinary(bytes: Array[Byte], clazz: Option[Class[_]]): AnyRef
     }
 
-    lazy val isEnabled = clusterObjectInstance.isDefined
+    type TransactionLogObject = {
+      def newLogFor(
+        id: String,
+        isAsync: Boolean,
+        replicationScheme: ReplicationScheme,
+        format: Serializer): TransactionLog
 
-    val clusterObjectInstance: Option[AnyRef] =
-      getObjectFor("akka.cloud.cluster.Cluster$")
+      def logFor(
+        id: String,
+        isAsync: Boolean,
+        replicationScheme: ReplicationScheme,
+        format: Serializer): TransactionLog
 
-    val serializerClass: Option[Class[_]] =
-      getClassFor("akka.serialization.Serializer")
+      def shutdown()
+    }
 
-    def ensureEnabled = if (!isEnabled) throw new ModuleNotAvailableException(
-      "Feature is only available in Akka Cloud")
-
-    def createFileBasedMailbox(actorRef: ActorRef): Mailbox = createMailbox("akka.cloud.cluster.FileBasedMailbox", actorRef)
-
-    def createZooKeeperBasedMailbox(actorRef: ActorRef): Mailbox = createMailbox("akka.cloud.cluster.ZooKeeperBasedMailbox", actorRef)
-
-    def createBeanstalkBasedMailbox(actorRef: ActorRef): Mailbox = createMailbox("akka.cloud.cluster.BeanstalkBasedMailbox", actorRef)
-
-    def createRedisBasedMailbox(actorRef: ActorRef): Mailbox = createMailbox("akka.cloud.cluster.RedisBasedMailbox", actorRef)
-
-    private def createMailbox(mailboxClassname: String, actorRef: ActorRef): Mailbox = {
-      ensureEnabled
-      createInstance(
-        mailboxClassname,
-        Array(classOf[ActorRef]),
-        Array(actorRef).asInstanceOf[Array[AnyRef]],
-        loader)
-        .getOrElse(throw new IllegalActorStateException("Could not create durable mailbox [" + mailboxClassname + "] for actor [" + actorRef + "]"))
-        .asInstanceOf[Mailbox]
+    type TransactionLog = {
+      def recordEntry(messageHandle: MessageInvocation, actorRef: ActorRef)
+      def recordEntry(entry: Array[Byte])
+      def recordSnapshot(snapshot: Array[Byte])
+      def entries: Vector[Array[Byte]]
+      def entriesFromLatestSnapshot: Tuple2[Array[Byte], Vector[Array[Byte]]]
+      def entriesInRange(from: Long, to: Long): Vector[Array[Byte]]
+      def latestEntryId: Long
+      def latestSnapshotId: Long
+      def delete()
+      def close()
     }
   }
 
+  /**
+   * Reflective access to the RemoteClient module.
+   *
+   * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
+   */
+  object RemoteModule {
+    val TRANSPORT = Config.config.getString("akka.remote.layer", "akka.remote.netty.NettyRemoteSupport")
+
+    val configDefaultAddress = new InetSocketAddress(Config.hostname, Config.remoteServerPort)
+
+    lazy val isEnabled = remoteSupportClass.isDefined
+
+    def ensureEnabled() = {
+      if (!isEnabled) {
+        val e = new ModuleNotAvailableException("Can't load the remoting module, make sure that akka-remote.jar is on the classpath")
+        EventHandler.debug(this, e.toString)
+        throw e
+      }
+    }
+
+    val remoteSupportClass = getClassFor[RemoteSupport](TRANSPORT) match {
+      case Right(value) ⇒ Some(value)
+      case Left(exception) ⇒
+        EventHandler.debug(this, exception.toString)
+        None
+    }
+
+    protected[akka] val defaultRemoteSupport: Option[() ⇒ RemoteSupport] =
+      remoteSupportClass map { remoteClass ⇒
+        () ⇒ createInstance[RemoteSupport](
+          remoteClass,
+          Array[Class[_]](),
+          Array[AnyRef]()) match {
+            case Right(value) ⇒ value
+            case Left(exception) ⇒
+              val e = new ModuleNotAvailableException(
+                "Can't instantiate [%s] - make sure that akka-remote.jar is on the classpath".format(remoteClass.getName), exception)
+              EventHandler.debug(this, e.toString)
+              throw e
+          }
+      }
+  }
+
   val noParams = Array[Class[_]]()
-  val noArgs   = Array[AnyRef]()
+  val noArgs = Array[AnyRef]()
 
   def createInstance[T](clazz: Class[_],
                         params: Array[Class[_]],
-                        args: Array[AnyRef]): Option[T] = try {
+                        args: Array[AnyRef]): Either[Exception, T] = try {
     assert(clazz ne null)
     assert(params ne null)
     assert(args ne null)
     val ctor = clazz.getDeclaredConstructor(params: _*)
     ctor.setAccessible(true)
-    Some(ctor.newInstance(args: _*).asInstanceOf[T])
+    Right(ctor.newInstance(args: _*).asInstanceOf[T])
   } catch {
-    case e =>
-      log.slf4j.warn("Could not instantiate class [{}] due to [{}]", clazz.getName, e.getCause)
-      None
+    case e: java.lang.reflect.InvocationTargetException ⇒
+      EventHandler.debug(this, e.getCause.toString)
+      Left(e)
+    case e: Exception ⇒
+      EventHandler.debug(this, e.toString)
+      Left(e)
   }
 
   def createInstance[T](fqn: String,
                         params: Array[Class[_]],
                         args: Array[AnyRef],
-                        classloader: ClassLoader = loader): Option[T] = try {
-    assert(fqn ne null)
+                        classloader: ClassLoader = loader): Either[Exception, T] = try {
     assert(params ne null)
     assert(args ne null)
-    val clazz = classloader.loadClass(fqn)
-    val ctor = clazz.getDeclaredConstructor(params: _*)
-    ctor.setAccessible(true)
-    Some(ctor.newInstance(args: _*).asInstanceOf[T])
+    getClassFor(fqn, classloader) match {
+      case Right(value) ⇒
+        val ctor = value.getDeclaredConstructor(params: _*)
+        ctor.setAccessible(true)
+        Right(ctor.newInstance(args: _*).asInstanceOf[T])
+      case Left(exception) ⇒ Left(exception) //We could just cast this to Either[Exception, T] but it's ugly
+    }
   } catch {
-    case e =>
-      log.slf4j.warn("Could not instantiate class [{}] due to [{}]", fqn, e.getCause)
-      None
+    case e: Exception ⇒
+      Left(e)
   }
 
-  def getObjectFor[T](fqn: String, classloader: ClassLoader = loader): Option[T] = try {//Obtains a reference to $MODULE$
-    assert(fqn ne null)
-    val clazz = classloader.loadClass(fqn)
-    val instance = clazz.getDeclaredField("MODULE$")
-    instance.setAccessible(true)
-    Option(instance.get(null).asInstanceOf[T])
+  //Obtains a reference to fqn.MODULE$
+  def getObjectFor[T](fqn: String, classloader: ClassLoader = loader): Either[Exception, T] = try {
+    getClassFor(fqn, classloader) match {
+      case Right(value) ⇒
+        val instance = value.getDeclaredField("MODULE$")
+        instance.setAccessible(true)
+        val obj = instance.get(null)
+        if (obj eq null) Left(new NullPointerException) else Right(obj.asInstanceOf[T])
+      case Left(exception) ⇒ Left(exception) //We could just cast this to Either[Exception, T] but it's ugly
+    }
   } catch {
-    case e: ClassNotFoundException => {
-      log.slf4j.debug("Could not get object [{}] due to [{}]", fqn, e)
-      None
-    }
-    case ei: ExceptionInInitializerError => {
-      log.error("Exception in initializer for object [%s]".format(fqn))
-      log.error(ei.getCause, "Cause was:")
-      throw ei
-    }
+    case e: Exception ⇒
+      Left(e)
   }
 
-  def getClassFor[T](fqn: String, classloader: ClassLoader = loader): Option[Class[T]] = try {
+  def getClassFor[T](fqn: String, classloader: ClassLoader = loader): Either[Exception, Class[T]] = try {
     assert(fqn ne null)
-    Some(classloader.loadClass(fqn).asInstanceOf[Class[T]])
+
+    // First, use the specified CL
+    val first = try {
+      Right(classloader.loadClass(fqn).asInstanceOf[Class[T]])
+    } catch {
+      case c: ClassNotFoundException ⇒ Left(c)
+    }
+
+    if (first.isRight) first
+    else {
+      // Second option is to use the ContextClassLoader
+      val second = try {
+        Right(Thread.currentThread.getContextClassLoader.loadClass(fqn).asInstanceOf[Class[T]])
+      } catch {
+        case c: ClassNotFoundException ⇒ Left(c)
+      }
+
+      if (second.isRight) second
+      else {
+        val third = try {
+          if (classloader ne loader) Right(loader.loadClass(fqn).asInstanceOf[Class[T]]) else Left(null) //Horrid
+        } catch {
+          case c: ClassNotFoundException ⇒ Left(c)
+        }
+
+        if (third.isRight) third
+        else {
+          try {
+            Right(Class.forName(fqn).asInstanceOf[Class[T]]) // Last option is Class.forName
+          } catch {
+            case c: ClassNotFoundException ⇒ Left(c)
+          }
+        }
+      }
+    }
   } catch {
-    case e => None
+    case e: Exception ⇒ Left(e)
   }
 }

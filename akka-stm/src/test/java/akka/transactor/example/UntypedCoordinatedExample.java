@@ -2,7 +2,7 @@ package akka.transactor.example;
 
 import akka.transactor.Coordinated;
 import akka.actor.ActorRef;
-import akka.actor.UntypedActor;
+import akka.actor.Actors;
 import akka.dispatch.Future;
 import akka.dispatch.Futures;
 
@@ -12,15 +12,15 @@ public class UntypedCoordinatedExample {
         System.out.println("Untyped transactor example");
         System.out.println();
 
-        ActorRef counter1 = UntypedActor.actorOf(UntypedCoordinatedCounter.class).start();
-        ActorRef counter2 = UntypedActor.actorOf(UntypedCoordinatedCounter.class).start();
+        ActorRef counter1 = Actors.actorOf(UntypedCoordinatedCounter.class).start();
+        ActorRef counter2 = Actors.actorOf(UntypedCoordinatedCounter.class).start();
 
         counter1.sendOneWay(new Coordinated(new Increment(counter2)));
 
         Thread.sleep(3000);
 
-        Future future1 = counter1.sendRequestReplyFuture("GetCount");
-        Future future2 = counter2.sendRequestReplyFuture("GetCount");
+        Future future1 = counter1.ask("GetCount");
+        Future future2 = counter2.ask("GetCount");
 
         future1.await();
         if (future1.isCompleted()) {

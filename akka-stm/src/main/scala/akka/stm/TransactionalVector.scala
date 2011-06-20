@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
  */
 
 package akka.stm
@@ -7,7 +7,6 @@ package akka.stm
 import scala.collection.immutable.Vector
 
 import akka.actor.newUuid
-
 
 /**
  * Transactional vector that implements the IndexedSeq interface with an underlying Ref and Vector.
@@ -59,7 +58,7 @@ class TransactionalVector[T](initialValue: Vector[T]) extends Transactional with
 
   override def equals(other: Any): Boolean =
     other.isInstanceOf[TransactionalVector[_]] &&
-    other.hashCode == hashCode
+      other.hashCode == hashCode
 
   override def toString = if (Stm.activeTransaction) super.toString else "<TransactionalVector>"
 }

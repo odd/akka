@@ -4,8 +4,8 @@ import org.scalatest.WordSpec
 import org.scalatest.matchers.MustMatchers
 
 import akka.transactor.Coordinated
-import akka.actor.{Actor, ActorRef}
-import akka.stm.{Ref, TransactionFactory}
+import akka.actor.{ Actor, ActorRef }
+import akka.stm.{ Ref, TransactionFactory }
 import akka.util.duration._
 
 object CoordinatedIncrement {
@@ -18,12 +18,11 @@ object CoordinatedIncrement {
     implicit val txFactory = TransactionFactory(timeout = 3 seconds)
 
     def increment = {
-      log.slf4j.info(name + ": incrementing")
       count alter (_ + 1)
     }
 
     def receive = {
-      case coordinated @ Coordinated(Increment(friends)) => {
+      case coordinated@Coordinated(Increment(friends)) ⇒ {
         if (friends.nonEmpty) {
           friends.head ! coordinated(Increment(friends.tail))
         }
@@ -32,13 +31,13 @@ object CoordinatedIncrement {
         }
       }
 
-      case GetCount => self.reply(count.get)
+      case GetCount ⇒ self.reply(count.get)
     }
   }
 
   class Failer extends Actor {
     def receive = {
-      case Coordinated(Increment(friends)) => {
+      case Coordinated(Increment(friends)) ⇒ {
         throw new RuntimeException("Expected failure")
       }
     }
@@ -52,9 +51,9 @@ class CoordinatedIncrementSpec extends WordSpec with MustMatchers {
   val timeout = 5 seconds
 
   def createActors = {
-    def createCounter(i: Int) = Actor.actorOf(new Counter("counter" + i)).start
+    def createCounter(i: Int) = Actor.actorOf(new Counter("counter" + i)).start()
     val counters = (1 to numCounters) map createCounter
-    val failer = Actor.actorOf(new Failer).start
+    val failer = Actor.actorOf(new Failer).start()
     (counters, failer)
   }
 
@@ -64,11 +63,11 @@ class CoordinatedIncrementSpec extends WordSpec with MustMatchers {
       val coordinated = Coordinated()
       counters(0) ! coordinated(Increment(counters.tail))
       coordinated.await
-      for (counter <- counters) {
-        (counter !! GetCount).get must be === 1
+      for (counter ← counters) {
+        (counter ? GetCount).as[Int].get must be === 1
       }
-      counters foreach (_.stop)
-      failer.stop
+      counters foreach (_.stop())
+      failer.stop()
     }
 
     "increment no counters with a failing transaction" in {
@@ -76,11 +75,11 @@ class CoordinatedIncrementSpec extends WordSpec with MustMatchers {
       val coordinated = Coordinated()
       counters(0) ! Coordinated(Increment(counters.tail :+ failer))
       coordinated.await
-      for (counter <- counters) {
-        (counter !! GetCount).get must be === 0
+      for (counter ← counters) {
+        (counter ? GetCount).as[Int].get must be === 0
       }
-      counters foreach (_.stop)
-      failer.stop
+      counters foreach (_.stop())
+      failer.stop()
     }
   }
 }

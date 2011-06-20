@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
  */
 
 package akka.serialization
@@ -14,7 +14,7 @@ object Compression {
    */
   object LZF {
     import voldemort.store.compress.lzf._
-    def compress(bytes: Array[Byte]): Array[Byte]   = LZFEncoder encode bytes
+    def compress(bytes: Array[Byte]): Array[Byte] = LZFEncoder encode bytes
     def uncompress(bytes: Array[Byte]): Array[Byte] = LZFDecoder decode bytes
   }
 }

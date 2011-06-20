@@ -1,20 +1,19 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
  */
 
 package akka.actor
 
-import akka.config.Supervision._
 import akka.AkkaException
 import akka.util._
 import ReflectiveAccess._
 import Actor._
 
-import java.util.concurrent.{CopyOnWriteArrayList, ConcurrentHashMap}
+import java.util.concurrent.{ CopyOnWriteArrayList, ConcurrentHashMap }
 import java.net.InetSocketAddress
 import akka.config.Supervision._
 
-class SupervisorException private[akka](message: String) extends AkkaException(message)
+class SupervisorException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause)
 
 /**
  * Factory object for creating supervisors declarative. It creates instances of the 'Supervisor' class.
@@ -45,7 +44,7 @@ class SupervisorException private[akka](message: String) extends AkkaException(m
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
 object Supervisor {
-  def apply(config: SupervisorConfig): Supervisor = SupervisorFactory(config).newInstance.start
+  def apply(config: SupervisorConfig): Supervisor = SupervisorFactory(config).newInstance.start()
 }
 
 /**
@@ -76,12 +75,12 @@ object Supervisor {
  *
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
-case class SupervisorFactory(val config: SupervisorConfig) extends Logging {
+case class SupervisorFactory(val config: SupervisorConfig) {
 
   def newInstance: Supervisor = newInstanceFor(config)
 
   def newInstanceFor(config: SupervisorConfig): Supervisor = {
-    val supervisor = new Supervisor(config.restartStrategy)
+    val supervisor = new Supervisor(config.restartStrategy, config.maxRestartsHandler)
     supervisor.configure(config)
     supervisor.start
     supervisor
@@ -93,30 +92,31 @@ case class SupervisorFactory(val config: SupervisorConfig) extends Logging {
  * <p/>
  * The supervisor class is only used for the configuration system when configuring supervisor
  * hierarchies declaratively. Should not be used as part of the regular programming API. Instead
- * wire the children together using 'link', 'spawnLink' etc. and set the 'trapExit' flag in the
- * children that should trap error signals and trigger restart.
+ * wire the children together using 'link', 'startLink' etc.
  * <p/>
  * See the ScalaDoc for the SupervisorFactory for an example on how to declaratively wire up children.
  *
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
-sealed class Supervisor(handler: FaultHandlingStrategy) {
+sealed class Supervisor(handler: FaultHandlingStrategy, maxRestartsHandler: (ActorRef, MaximumNumberOfRestartsWithinTimeRangeReached) ⇒ Unit) {
   import Supervisor._
 
   private val _childActors = new ConcurrentHashMap[String, List[ActorRef]]
   private val _childSupervisors = new CopyOnWriteArrayList[Supervisor]
 
-  private[akka] val supervisor = actorOf(new SupervisorActor(handler)).start
+  private[akka] val supervisor = actorOf(new SupervisorActor(handler, maxRestartsHandler)).start()
 
   def uuid = supervisor.uuid
 
-  def start: Supervisor = {
+  def start(): Supervisor = {
     this
   }
 
-  def shutdown(): Unit = supervisor.stop
+  def shutdown(): Unit = supervisor.stop()
 
   def link(child: ActorRef) = supervisor.link(child)
+
+  def startLink(child: ActorRef) = supervisor.startLink(child)
 
   def unlink(child: ActorRef) = supervisor.unlink(child)
 
@@ -127,11 +127,12 @@ sealed class Supervisor(handler: FaultHandlingStrategy) {
     _childActors.values.toArray.toList.asInstanceOf[List[Supervisor]]
 
   def configure(config: SupervisorConfig): Unit = config match {
-    case SupervisorConfig(_, servers) =>
-      servers.map(server =>
+    case SupervisorConfig(_, servers, _) ⇒
+
+      servers.map(server ⇒
         server match {
-          case Supervise(actorRef, lifeCycle, remoteAddress) =>
-            actorRef.start
+          case Supervise(actorRef, lifeCycle, registerAsRemoteService) ⇒
+            actorRef.start()
             val className = actorRef.actor.getClass.getName
             val currentActors = {
               val list = _childActors.get(className)
@@ -141,11 +142,9 @@ sealed class Supervisor(handler: FaultHandlingStrategy) {
             _childActors.put(className, actorRef :: currentActors)
             actorRef.lifeCycle = lifeCycle
             supervisor.link(actorRef)
-            if (remoteAddress.isDefined) {
-              val address = remoteAddress.get
-              RemoteServerModule.registerActor(new InetSocketAddress(address.hostname, address.port), actorRef)
-            }
-          case supervisorConfig @ SupervisorConfig(_, _) => // recursive supervisor configuration
+            if (ClusterModule.isEnabled && registerAsRemoteService)
+              Actor.remote.register(actorRef)
+          case supervisorConfig@SupervisorConfig(_, _, _) ⇒ // recursive supervisor configuration
             val childSupervisor = Supervisor(supervisorConfig)
             supervisor.link(childSupervisor.supervisor)
             _childSupervisors.add(childSupervisor)
@@ -158,23 +157,21 @@ sealed class Supervisor(handler: FaultHandlingStrategy) {
  *
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
-final class SupervisorActor private[akka] (handler: FaultHandlingStrategy) extends Actor {
-  import self._
-  faultHandler = handler
+final class SupervisorActor private[akka] (handler: FaultHandlingStrategy, maxRestartsHandler: (ActorRef, MaximumNumberOfRestartsWithinTimeRangeReached) ⇒ Unit) extends Actor {
+  self.faultHandler = handler
 
-  override def postStop(): Unit = shutdownLinkedActors
+  override def postStop(): Unit = {
+    val i = self.linkedActors.values.iterator
+    while (i.hasNext) {
+      val ref = i.next
+      ref.stop()
+      self.unlink(ref)
+    }
+  }
 
   def receive = {
-    // FIXME add a way to respond to MaximumNumberOfRestartsWithinTimeRangeReached in declaratively configured Supervisor
-    case MaximumNumberOfRestartsWithinTimeRangeReached(
-      victim, maxNrOfRetries, withinTimeRange, lastExceptionCausingRestart) =>
-      Actor.log.slf4j.warn(
-        "Declaratively configured supervisor received a [MaximumNumberOfRestartsWithinTimeRangeReached] notification," +
-        "\n\tbut there is currently no way of handling it in a declaratively configured supervisor." +
-        "\n\tIf you want to be able to handle this error condition then you need to create the supervision tree programatically." +
-        "\n\tThis will be supported in the future.")
-    case unknown => throw new SupervisorException(
+    case max@MaximumNumberOfRestartsWithinTimeRangeReached(_, _, _, _) ⇒ maxRestartsHandler(self, max)
+    case unknown ⇒ throw new SupervisorException(
       "SupervisorActor can not respond to messages.\n\tUnknown message [" + unknown + "]")
   }
 }
-

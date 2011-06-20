@@ -1,13 +1,15 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
  */
 
 package akka.util
 
+import akka.event.EventHandler
+
 /**
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
-object Helpers extends Logging {
+object Helpers {
 
   implicit def null2Option[T](t: T): Option[T] = Option(t)
 
@@ -21,7 +23,30 @@ object Helpers extends Logging {
   }
 
   def bytesToInt(bytes: Array[Byte], offset: Int): Int = {
-    (0 until 4).foldLeft(0)((value, index) => value + ((bytes(index + offset) & 0x000000FF) << ((4 - 1 - index) * 8)))
+    (0 until 4).foldLeft(0)((value, index) ⇒ value + ((bytes(index + offset) & 0x000000FF) << ((4 - 1 - index) * 8)))
+  }
+
+  def flatten[T: ClassManifest](array: Array[Any]) = array.flatMap {
+    case arr: Array[T] ⇒ arr
+    case elem: T       ⇒ Array(elem)
+  }
+
+  def ignore[E: Manifest](body: ⇒ Unit) {
+    try {
+      body
+    } catch {
+      case e if manifest[E].erasure.isAssignableFrom(e.getClass) ⇒ ()
+    }
+  }
+
+  def withPrintStackTraceOnError(body: ⇒ Unit) {
+    try {
+      body
+    } catch {
+      case e: Throwable ⇒
+        EventHandler.error(e, this, e.toString)
+        throw e
+    }
   }
 
   /**
@@ -41,9 +66,7 @@ object Helpers extends Logging {
     try {
       narrow(o)
     } catch {
-      case e: ClassCastException =>
-        log.slf4j.warn("Cannot narrow {} to expected type {}!", o, implicitly[Manifest[T]].erasure.getName)
-        log.slf4j.trace("narrowSilently", e)
+      case e: ClassCastException ⇒
         None
     }
 
@@ -56,7 +79,7 @@ object Helpers extends Logging {
    * res0: ResultOrError[Int] = ResultOrError@a96606
    *
    * scala> res0()
-    res1: Int = 1
+   * res1: Int = 1
    *
    * scala> res0() = 3
    *
@@ -79,20 +102,20 @@ object Helpers extends Logging {
    *    at Re...
    * </pre>
    */
-  class ResultOrError[R](result: R){
+  class ResultOrError[R](result: R) {
     private[this] var contents: Either[R, Throwable] = Left(result)
 
-    def update(value: => R) = {
+    def update(value: ⇒ R) {
       contents = try {
         Left(value)
       } catch {
-        case (error : Throwable) => Right(error)
+        case (error: Throwable) ⇒ Right(error)
       }
     }
 
     def apply() = contents match {
-      case Left(result) => result
-      case Right(error) => throw error.fillInStackTrace
+      case Left(result) ⇒ result
+      case Right(error) ⇒ throw error.fillInStackTrace
     }
   }
   object ResultOrError {

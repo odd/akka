@@ -13,7 +13,6 @@ TAGS
 akka.tmproj
 reports
 dist
-build
 target
 deploy/*.jar
 data
@@ -44,3 +43,12 @@ run-codefellow
 .scala_dependencies
 multiverse.log
 .eprj
+.*.swp
+akka-docs/_build/
+*.pyc
+akka-tutorials/akka-tutorial-first/project/boot/
+akka-tutorials/akka-tutorial-first/project/plugins/project/
+akka-docs/exts/
+_akka_cluster/
+Makefile
+akka.sublime-project

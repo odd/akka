@@ -1,10 +1,10 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
  */
 
 package akka.config
 
-import akka.config.Supervision. {SuperviseTypedActor, FaultHandlingStrategy}
+import akka.config.Supervision.{ SuperviseTypedActor, FaultHandlingStrategy }
 
 private[akka] trait TypedActorConfiguratorBase {
   def getExternalDependency[T](clazz: Class[T]): T

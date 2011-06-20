@@ -1,12 +1,11 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
  */
 
 package akka.transactor
 
-import akka.actor.{Actor, ActorRef}
-import akka.stm.{DefaultTransactionConfig, TransactionFactory}
-
+import akka.actor.{ Actor, ActorRef }
+import akka.stm.{ DefaultTransactionConfig, TransactionFactory }
 
 /**
  * Used for specifying actor refs and messages to send to during coordination.
@@ -82,7 +81,7 @@ case class SendTo(actor: ActorRef, message: Option[Any] = None)
  * }}}
  * <br/>
  *
- * To exeucte directly before or after the coordinated transaction, override
+ * To execute directly before or after the coordinated transaction, override
  * the `before` and `after` methods. These methods also expect partial functions
  * like the receive method. They do not execute within the transaction.
  *
@@ -106,16 +105,16 @@ trait Transactor extends Actor {
    * Implement a general pattern for using coordinated transactions.
    */
   final def receive = {
-    case coordinated @ Coordinated(message) => {
+    case coordinated@Coordinated(message) ⇒ {
       val others = (coordinate orElse alone)(message)
-      for (sendTo <- others) {
+      for (sendTo ← others) {
         sendTo.actor ! coordinated(sendTo.message.getOrElse(message))
       }
       (before orElse doNothing)(message)
       coordinated.atomic(txFactory) { (atomically orElse doNothing)(message) }
       (after orElse doNothing)(message)
     }
-    case message => {
+    case message ⇒ {
       if (normally.isDefinedAt(message)) normally(message)
       else receive(Coordinated(message))
     }
@@ -133,7 +132,7 @@ trait Transactor extends Actor {
   /**
    * Default coordination - no other transactors.
    */
-  def alone: PartialFunction[Any, Set[SendTo]] = { case _ => nobody }
+  def alone: PartialFunction[Any, Set[SendTo]] = { case _ ⇒ nobody }
 
   /**
    * Empty set of transactors to send to.
@@ -150,7 +149,7 @@ trait Transactor extends Actor {
    * Include other actors in this coordinated transaction and specify the message
    * to send by providing ActorRef -> Message pairs. Use as the result in 'coordinated'.
    */
-  def sendTo(pairs: (ActorRef, Any)*): Set[SendTo] = pairs map (p => SendTo(p._1, Some(p._2))) toSet
+  def sendTo(pairs: (ActorRef, Any)*): Set[SendTo] = pairs map (p ⇒ SendTo(p._1, Some(p._2))) toSet
 
   /**
    * A Receive block that runs before the coordinated transaction is entered.
