@@ -91,33 +91,25 @@ object ChangeListener {
  *
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
-class NodeAddress(
-  val clusterName: String,
-  val nodeName: String,
-  val hostname: String,
-  val port: Int) {
-  if ((hostname eq null) || hostname == "") throw new NullPointerException("Host name must not be null or empty string")
-  if ((nodeName eq null) || nodeName == "") throw new NullPointerException("Node name must not be null or empty string")
+class NodeAddress(val clusterName: String, val nodeName: String) {
   if ((clusterName eq null) || clusterName == "") throw new NullPointerException("Cluster name must not be null or empty string")
-  if (port < 1) throw new NullPointerException("Port can not be negative")
+  if ((nodeName eq null) || nodeName == "") throw new NullPointerException("Node name must not be null or empty string")
 
-  override def toString = "%s:%s:%s:%s".format(clusterName, nodeName, hostname, port)
+  override def toString = "%s:%s".format(clusterName, nodeName)
 
-  override def hashCode = 0 + clusterName.## + nodeName.## + hostname.## + port.##
+  override def hashCode = 0 + clusterName.## + nodeName.##
 
   override def equals(other: Any) = NodeAddress.unapply(this) == NodeAddress.unapply(other)
 }
 
+/**
+ * NodeAddress companion object and factory.
+ */
 object NodeAddress {
-
-  def apply(
-    clusterName: String = Config.clusterName,
-    nodeName: String = Config.nodename,
-    hostname: String = Config.hostname,
-    port: Int = Config.remoteServerPort): NodeAddress = new NodeAddress(clusterName, nodeName, hostname, port)
+  def apply(clusterName: String = Config.clusterName, nodeName: String = Config.nodename): NodeAddress = new NodeAddress(clusterName, nodeName)
 
   def unapply(other: Any) = other match {
-    case address: NodeAddress ⇒ Some((address.clusterName, address.nodeName, address.hostname, address.port))
+    case address: NodeAddress ⇒ Some((address.clusterName, address.nodeName))
     case _                    ⇒ None
   }
 }
@@ -130,23 +122,21 @@ object NodeAddress {
 trait ClusterNode {
   import ChangeListener._
 
-  def nodeAddress: NodeAddress
-  def zkServerAddresses: String
-
-  def remoteClientLifeCycleListener: ActorRef
-  def remoteDaemon: ActorRef
-  def remoteService: RemoteSupport
-  def remoteServerAddress: InetSocketAddress
-
   val isConnected = new Switch(false)
-  val isLeader = new AtomicBoolean(false)
-  val electionNumber = new AtomicInteger(Int.MaxValue)
 
   private[cluster] val locallyCachedMembershipNodes = new ConcurrentSkipListSet[String]()
   private[cluster] val nodeNameToAddress: ConcurrentMap[String, InetSocketAddress] = new ConcurrentHashMap[String, InetSocketAddress]
   private[cluster] val locallyCheckedOutActors: ConcurrentMap[UUID, Array[Byte]] = new ConcurrentHashMap[UUID, Array[Byte]]
 
   def membershipNodes: Array[String]
+
+  def nodeAddress: NodeAddress
+
+  def zkServerAddresses: String
+
+  def remoteService: RemoteSupport
+
+  def remoteServerAddress: InetSocketAddress
 
   def isRunning: Boolean = isConnected.isOn
 
@@ -169,6 +159,11 @@ trait ClusterNode {
   def leader: String
 
   /**
+   * Returns true if 'this' node is the current leader.
+   */
+  def isLeader: Boolean
+
+  /**
    * Explicitly resign from being a leader. If this node is not a leader then this operation is a no-op.
    */
   def resign()
@@ -178,127 +173,127 @@ trait ClusterNode {
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store[T <: Actor](address: String, actorClass: Class[T], format: Serializer): ClusterNode
+  def store[T <: Actor](address: String, actorClass: Class[T], serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor of a specific type. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store[T <: Actor](address: String, actorClass: Class[T], replicationScheme: ReplicationScheme, format: Serializer): ClusterNode
+  def store[T <: Actor](address: String, actorClass: Class[T], replicationScheme: ReplicationScheme, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor of a specific type. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store[T <: Actor](address: String, actorClass: Class[T], replicationFactor: Int, format: Serializer): ClusterNode
+  def store[T <: Actor](address: String, actorClass: Class[T], replicationFactor: Int, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor of a specific type. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store[T <: Actor](address: String, actorClass: Class[T], replicationFactor: Int, replicationScheme: ReplicationScheme, format: Serializer): ClusterNode
+  def store[T <: Actor](address: String, actorClass: Class[T], replicationFactor: Int, replicationScheme: ReplicationScheme, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor of a specific type. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store[T <: Actor](address: String, actorClass: Class[T], serializeMailbox: Boolean, format: Serializer): ClusterNode
+  def store[T <: Actor](address: String, actorClass: Class[T], serializeMailbox: Boolean, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor of a specific type. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store[T <: Actor](address: String, actorClass: Class[T], replicationScheme: ReplicationScheme, serializeMailbox: Boolean, format: Serializer): ClusterNode
+  def store[T <: Actor](address: String, actorClass: Class[T], replicationScheme: ReplicationScheme, serializeMailbox: Boolean, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor of a specific type. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store[T <: Actor](address: String, actorClass: Class[T], replicationFactor: Int, serializeMailbox: Boolean, format: Serializer): ClusterNode
+  def store[T <: Actor](address: String, actorClass: Class[T], replicationFactor: Int, serializeMailbox: Boolean, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor of a specific type. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store[T <: Actor](address: String, actorClass: Class[T], replicationFactor: Int, replicationScheme: ReplicationScheme, serializeMailbox: Boolean, format: Serializer): ClusterNode
+  def store[T <: Actor](address: String, actorClass: Class[T], replicationFactor: Int, replicationScheme: ReplicationScheme, serializeMailbox: Boolean, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor with UUID. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store(actorRef: ActorRef, format: Serializer): ClusterNode
+  def store(actorRef: ActorRef, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor with UUID. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store(actorRef: ActorRef, replicationScheme: ReplicationScheme, format: Serializer): ClusterNode
+  def store(actorRef: ActorRef, serializeMailbox: Boolean, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor with UUID. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store(actorRef: ActorRef, replicationFactor: Int, format: Serializer): ClusterNode
+  def store(actorRef: ActorRef, replicationScheme: ReplicationScheme, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor with UUID. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store(actorRef: ActorRef, replicationFactor: Int, replicationScheme: ReplicationScheme, format: Serializer): ClusterNode
+  def store(actorRef: ActorRef, replicationFactor: Int, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor with UUID. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store(actorRef: ActorRef, serializeMailbox: Boolean, format: Serializer): ClusterNode
+  def store(actorRef: ActorRef, replicationFactor: Int, replicationScheme: ReplicationScheme, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor with UUID. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store(actorRef: ActorRef, replicationScheme: ReplicationScheme, serializeMailbox: Boolean, format: Serializer): ClusterNode
+  def store(actorRef: ActorRef, replicationScheme: ReplicationScheme, serializeMailbox: Boolean, serializer: Serializer): ClusterNode
 
   /**
    * Needed to have reflection through structural typing work.
    */
-  def store(actorRef: ActorRef, replicationFactor: Int, serializeMailbox: Boolean, format: AnyRef): ClusterNode
+  def store(actorRef: ActorRef, replicationFactor: Int, serializeMailbox: Boolean, serializer: AnyRef): ClusterNode
 
   /**
    * Needed to have reflection through structural typing work.
    */
-  def store(actorRef: ActorRef, replicationFactor: Int, replicationScheme: ReplicationScheme, serializeMailbox: Boolean, format: AnyRef): ClusterNode
+  def store(actorRef: ActorRef, replicationFactor: Int, replicationScheme: ReplicationScheme, serializeMailbox: Boolean, serializer: AnyRef): ClusterNode
 
   /**
    * Clusters an actor with UUID. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store(actorRef: ActorRef, replicationFactor: Int, serializeMailbox: Boolean, format: Serializer): ClusterNode
+  def store(actorRef: ActorRef, replicationFactor: Int, serializeMailbox: Boolean, serializer: Serializer): ClusterNode
 
   /**
    * Clusters an actor with UUID. If the actor is already clustered then the clustered version will be updated
    * with the actor passed in as argument. You can use this to save off snapshots of the actor to a highly
    * available durable store.
    */
-  def store(actorRef: ActorRef, replicationFactor: Int, replicationScheme: ReplicationScheme, serializeMailbox: Boolean, format: Serializer): ClusterNode
+  def store(actorRef: ActorRef, replicationFactor: Int, replicationScheme: ReplicationScheme, serializeMailbox: Boolean, serializer: Serializer): ClusterNode
 
   /**
-   * Removes actor with uuid from the cluster.
+   * Removes actor from the cluster.
    */
-  def remove(uuid: UUID)
+  def remove(actorRef: ActorRef)
 
   /**
    * Removes actor with address from the cluster.
@@ -330,7 +325,7 @@ trait ClusterNode {
    * Checks out an actor for use on this node, e.g. checked out as a 'LocalActorRef' but it makes it available
    * for remote access through lookup by its UUID.
    */
-  def use[T <: Actor](actorAddress: String, format: Serializer): Option[ActorRef]
+  def use[T <: Actor](actorAddress: String, serializer: Serializer): Option[ActorRef]
 
   /**
    * Using (checking out) all actors with a specific UUID on all nodes in the cluster.
@@ -345,12 +340,12 @@ trait ClusterNode {
   /**
    * Checks in an actor after done using it on this node.
    */
-  def release(actorAddress: String)
+  def release(actorRef: ActorRef)
 
   /**
-   * Releases (checking in) all actors with a specific UUID on all nodes in the cluster where the actor is in 'use'.
+   * Checks in an actor after done using it on this node.
    */
-  def releaseActorOnAllNodes(uuid: UUID)
+  def release(actorAddress: String)
 
   /**
    * Creates an ActorRef with a Router to a set of clustered actors.
@@ -368,19 +363,9 @@ trait ClusterNode {
   def migrate(from: NodeAddress, to: NodeAddress, actorAddress: String)
 
   /**
-   * Returns the UUIDs of all actors checked out on this node.
-   */
-  def uuidsForActorsInUse: Array[UUID]
-
-  /**
    * Returns the addresses of all actors checked out on this node.
    */
   def addressesForActorsInUse: Array[String]
-
-  /**
-   * Returns the UUIDs of all actors registered in this cluster.
-   */
-  def uuidsForClusteredActors: Array[UUID]
 
   /**
    * Returns the addresses of all actors registered in this cluster.
@@ -388,39 +373,14 @@ trait ClusterNode {
   def addressesForClusteredActors: Array[String]
 
   /**
-   * Returns the actor id for the actor with a specific UUID.
-   */
-  def actorAddressForUuid(uuid: UUID): Option[String]
-
-  /**
-   * Returns the actor ids for all the actors with a specific UUID.
-   */
-  def actorAddressForUuids(uuids: Array[UUID]): Array[String]
-
-  /**
-   * Returns the actor UUIDs for actor ID.
-   */
-  def uuidsForActorAddress(actorAddress: String): Array[UUID]
-
-  /**
-   * Returns the node names of all actors in use with UUID.
-   */
-  def nodesForActorsInUseWithUuid(uuid: UUID): Array[String]
-
-  /**
-   * Returns the UUIDs of all actors in use registered on a specific node.
-   */
-  def uuidsForActorsInUseOnNode(nodeName: String): Array[UUID]
-
-  /**
    * Returns the addresses of all actors in use registered on a specific node.
    */
   def addressesForActorsInUseOnNode(nodeName: String): Array[String]
 
   /**
-   * Returns Format for actor with UUID.
+   * Returns Serializer for actor with UUID.
    */
-  def formatForActor(actorAddress: String): Serializer
+  def serializerForActor(actorAddress: String): Serializer
 
   /**
    * Returns home address for actor with UUID.
@@ -451,20 +411,80 @@ trait ClusterNode {
    */
   def send(f: Function1[Any, Any], arg: Any, replicationFactor: Int): List[Future[Any]]
 
+  /**
+   * Stores a configuration element under a specific key.
+   * If the key already exists then it will be overwritten.
+   */
   def setConfigElement(key: String, bytes: Array[Byte])
 
   /**
    * Returns the config element for the key or NULL if no element exists under the key.
+   * Returns <code>Some(element)</code> if it exists else <code>None</code>
    */
   def getConfigElement(key: String): Option[Array[Byte]]
 
+  /**
+   * Removes configuration element for a specific key.
+   * Does nothing if the key does not exist.
+   */
   def removeConfigElement(key: String)
 
+  /**
+   * Returns a list with all config element keys.
+   */
   def getConfigElementKeys: Array[String]
 
-  private[cluster] def initializeNode()
+  // =============== PRIVATE METHODS ===============
 
-  private[cluster] def addressForNode(node: String): Option[InetSocketAddress]
+  private[cluster] def remoteClientLifeCycleListener: ActorRef
+  private[cluster] def remoteDaemon: ActorRef
+
+  /**
+   * Removes actor with uuid from the cluster.
+   */
+  private[cluster] def remove(uuid: UUID)
+
+  /**
+   * Releases (checking in) all actors with a specific UUID on all nodes in the cluster where the actor is in 'use'.
+   */
+  private[cluster] def releaseActorOnAllNodes(uuid: UUID)
+
+  /**
+   * Returns the UUIDs of all actors checked out on this node.
+   */
+  private[cluster] def uuidsForActorsInUse: Array[UUID]
+
+  /**
+   * Returns the UUIDs of all actors registered in this cluster.
+   */
+  private[cluster] def uuidsForClusteredActors: Array[UUID]
+
+  /**
+   * Returns the actor id for the actor with a specific UUID.
+   */
+  private[cluster] def actorAddressForUuid(uuid: UUID): Option[String]
+
+  /**
+   * Returns the actor ids for all the actors with a specific UUID.
+   */
+  private[cluster] def actorAddressForUuids(uuids: Array[UUID]): Array[String]
+
+  /**
+   * Returns the actor UUIDs for actor ID.
+   */
+  private[cluster] def uuidsForActorAddress(actorAddress: String): Array[UUID]
+
+  /**
+   * Returns the node names of all actors in use with UUID.
+   */
+  private[cluster] def nodesForActorsInUseWithUuid(uuid: UUID): Array[String]
+
+  /**
+   * Returns the UUIDs of all actors in use registered on a specific node.
+   */
+  private[cluster] def uuidsForActorsInUseOnNode(nodeName: String): Array[UUID]
+
+  private[cluster] def initializeNode()
 
   private[cluster] def publish(change: ChangeNotification)
 
@@ -478,15 +498,13 @@ trait ClusterNode {
 
   private[cluster] def findNewlyDisconnectedAvailableNodes(nodes: List[String]): List[String]
 
-  private[cluster] def joinMembershipNode()
-
-  private[cluster] def joinActorsAtAddressNode()
+  private[cluster] def joinCluster()
 
   private[cluster] def joinLeaderElection: Boolean
 
   private[cluster] def failOverConnections(from: InetSocketAddress, to: InetSocketAddress)
 
-  private[cluster] def migrateFromFailedNodes[T <: Actor](currentSetOfClusterNodes: List[String])
+  private[cluster] def migrateActorsOnFailedNodes(currentNodes: List[String])
 
   private[cluster] def membershipPathFor(node: String): String
 
@@ -504,12 +522,16 @@ trait ClusterNode {
 
   private[cluster] def actorRegistryPathFor(uuid: UUID): String
 
-  private[cluster] def actorRegistryFormatPathFor(uuid: UUID): String
+  private[cluster] def actorRegistrySerializerPathFor(uuid: UUID): String
 
   private[cluster] def actorRegistryActorAddressPathFor(uuid: UUID): String
 
   private[cluster] def actorRegistryNodePathFor(uuid: UUID): String
 
   private[cluster] def actorRegistryNodePathFor(uuid: UUID, address: InetSocketAddress): String
+
+  private[cluster] def remoteSocketAddressForNode(node: String): Option[InetSocketAddress]
+
+  private[cluster] def createActorsAtAddressPath()
 }
 
