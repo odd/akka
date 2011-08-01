@@ -291,13 +291,13 @@ Now we can create the worker actor.  This is done by extending in the ``UntypedA
           double result = calculatePiFor(work.getStart(), work.getNrOfElements());
 
           // reply with the result
-          getContext().replyUnsafe(new Result(result));
+          getContext().reply(new Result(result));
 
         } else throw new IllegalArgumentException("Unknown message [" + message + "]");
       }
     }
 
-As you can see we have now created an ``UntypedActor`` with a ``onReceive`` method as a handler for the ``Work`` message. In this handler we invoke the ``calculatePiFor(..)`` method, wrap the result in a ``Result`` message and send it back to the original sender using ``getContext().replyUnsafe(..)``. In Akka the sender reference is implicitly passed along with the message so that the receiver can always reply or store away the sender reference for future use.
+As you can see we have now created an ``UntypedActor`` with a ``onReceive`` method as a handler for the ``Work`` message. In this handler we invoke the ``calculatePiFor(..)`` method, wrap the result in a ``Result`` message and send it back to the original sender using ``getContext().reply(..)``. In Akka the sender reference is implicitly passed along with the message so that the receiver can always reply or store away the sender reference for future use.
 
 The only thing missing in our ``Worker`` actor is the implementation on the ``calculatePiFor(..)`` method::
 
@@ -456,14 +456,14 @@ Let's capture this in code::
       if (message instanceof Calculate) {
         // schedule work
         for (int start = 0; start < nrOfMessages; start++) {
-          router.sendOneWay(new Work(start, nrOfElements), getContext());
+          router.tell(new Work(start, nrOfElements), getContext());
         }
 
         // send a PoisonPill to all workers telling them to shut down themselves
-        router.sendOneWay(new Broadcast(poisonPill()));
+        router.tell(new Broadcast(poisonPill()));
 
         // send a PoisonPill to the router, telling him to shut himself down
-        router.sendOneWay(poisonPill());
+        router.tell(poisonPill());
 
       } else if (message instanceof Result) {
 
@@ -502,7 +502,7 @@ Now the only thing that is left to implement is the runner that should bootstrap
         }).start();
 
         // start the calculation
-        master.sendOneWay(new Calculate());
+        master.tell(new Calculate());
 
         // wait for master to shut down
         latch.await();
@@ -587,7 +587,7 @@ Before we package it up and run it, let's take a look at the full code now, with
             double result = calculatePiFor(work.getStart(), work.getNrOfElements())
 
             // reply with the result
-            getContext().replyUnsafe(new Result(result));
+            getContext().reply(new Result(result));
 
           } else throw new IllegalArgumentException("Unknown message [" + message + "]");
         }
@@ -646,14 +646,14 @@ Before we package it up and run it, let's take a look at the full code now, with
           if (message instanceof Calculate) {
             // schedule work
             for (int start = 0; start < nrOfMessages; start++) {
-              router.sendOneWay(new Work(start, nrOfElements), getContext());
+              router.tell(new Work(start, nrOfElements), getContext());
             }
 
             // send a PoisonPill to all workers telling them to shut down themselves
-            router.sendOneWay(new Broadcast(poisonPill()));
+            router.tell(new Broadcast(poisonPill()));
 
             // send a PoisonPill to the router, telling him to shut himself down
-            router.sendOneWay(poisonPill());
+            router.tell(poisonPill());
 
           } else if (message instanceof Result) {
 
@@ -698,7 +698,7 @@ Before we package it up and run it, let's take a look at the full code now, with
         }).start();
 
         // start the calculation
-        master.sendOneWay(new Calculate());
+        master.tell(new Calculate());
 
         // wait for master to shut down
         latch.await();

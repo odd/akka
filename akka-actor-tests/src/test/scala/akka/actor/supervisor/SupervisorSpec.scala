@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -7,13 +7,16 @@ package akka.actor
 import org.scalatest.WordSpec
 import org.scalatest.matchers.MustMatchers
 import org.scalatest.BeforeAndAfterEach
+import org.scalatest.BeforeAndAfterAll
 
-import akka.testkit._
 import akka.testkit.Testing.sleepFor
 import akka.util.duration._
 import akka.config.Supervision._
 import akka.{ Die, Ping }
 import Actor._
+import akka.event.EventHandler
+import akka.testkit.TestEvent._
+import akka.testkit.EventFilter
 
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.LinkedBlockingQueue
@@ -42,7 +45,7 @@ object SupervisorSpec {
     def receive = {
       case Ping ⇒
         messageLog.put(PingMessage)
-        self.reply_?(PongMessage)
+        self.tryReply(PongMessage)
       case Die ⇒
         throw new RuntimeException(ExceptionMessage)
     }
@@ -67,6 +70,7 @@ object SupervisorSpec {
 
     override def receive = {
       case Die ⇒ (temp.?(Die, TimeoutMillis)).get
+      case _: MaximumNumberOfRestartsWithinTimeRangeReached ⇒
     }
   }
 
@@ -192,8 +196,18 @@ object SupervisorSpec {
   }
 }
 
-class SupervisorSpec extends WordSpec with MustMatchers with BeforeAndAfterEach {
+class SupervisorSpec extends WordSpec with MustMatchers with BeforeAndAfterEach with BeforeAndAfterAll {
   import SupervisorSpec._
+
+  override def beforeAll() = {
+    EventHandler notify Mute(EventFilter[Exception]("Die"),
+      EventFilter[IllegalStateException]("Don't wanna!"),
+      EventFilter[RuntimeException]("Expected"))
+  }
+
+  override def afterAll() = {
+    EventHandler notify UnMuteAll
+  }
 
   override def beforeEach() = {
     messageLog.clear
@@ -205,7 +219,7 @@ class SupervisorSpec extends WordSpec with MustMatchers with BeforeAndAfterEach 
   }
 
   def kill(pingPongActor: ActorRef) = {
-    intercept[RuntimeException] { pingPongActor !! (Die, TimeoutMillis) }
+    intercept[RuntimeException] { (pingPongActor ? (Die, TimeoutMillis)).as[Any] }
     messageLogPoll must be === ExceptionMessage
   }
 
@@ -362,7 +376,7 @@ class SupervisorSpec extends WordSpec with MustMatchers with BeforeAndAfterEach 
         if (inits.get % 2 == 0) throw new IllegalStateException("Don't wanna!")
 
         def receive = {
-          case Ping ⇒ self.reply_?(PongMessage)
+          case Ping ⇒ self.tryReply(PongMessage)
           case Die  ⇒ throw new Exception("expected")
         }
       })

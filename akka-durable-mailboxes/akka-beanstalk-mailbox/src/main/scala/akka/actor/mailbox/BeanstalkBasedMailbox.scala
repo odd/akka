@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ *  Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.actor.mailbox
 
@@ -15,23 +15,23 @@ import akka.event.EventHandler
 import com.surftools.BeanstalkClient._
 import com.surftools.BeanstalkClientImpl._
 
-class BeanstalkBasedMailboxException(message: String) extends AkkaException(message)
+class BeanstalkBasedMailboxException(message: String) extends AkkaException(message) {}
 
 /**
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
 class BeanstalkBasedMailbox(val owner: ActorRef) extends DurableExecutableMailbox(owner) {
 
-  val hostname             = config.getString("akka.actor.mailbox.beanstalk.hostname", "0.0.0.0")
-  val port                 = config.getInt("akka.actor.mailbox.beanstalk.port", 11300)
-  val reconnectWindow      = Duration(config.getInt("akka.actor.mailbox.beanstalk.reconnect-window", 5), TIME_UNIT).toSeconds.toInt
-  val messageSubmitDelay   = Duration(config.getInt("akka.actor.mailbox.beanstalk.message-submit-delay", 0), TIME_UNIT).toSeconds.toInt
+  val hostname = config.getString("akka.actor.mailbox.beanstalk.hostname", "0.0.0.0")
+  val port = config.getInt("akka.actor.mailbox.beanstalk.port", 11300)
+  val reconnectWindow = Duration(config.getInt("akka.actor.mailbox.beanstalk.reconnect-window", 5), TIME_UNIT).toSeconds.toInt
+  val messageSubmitDelay = Duration(config.getInt("akka.actor.mailbox.beanstalk.message-submit-delay", 0), TIME_UNIT).toSeconds.toInt
   val messageSubmitTimeout = Duration(config.getInt("akka.actor.mailbox.beanstalk.message-submit-timeout", 5), TIME_UNIT).toSeconds.toInt
-  val messageTimeToLive    = Duration(config.getInt("akka.actor.mailbox.beanstalk.message-time-to-live", 120), TIME_UNIT).toSeconds.toInt
+  val messageTimeToLive = Duration(config.getInt("akka.actor.mailbox.beanstalk.message-time-to-live", 120), TIME_UNIT).toSeconds.toInt
 
   private val queue = new ThreadLocal[Client] { override def initialValue = connect(name) }
 
- // ===== For MessageQueue =====
+  // ===== For MessageQueue =====
 
   def enqueue(durableMessage: MessageInvocation) = {
     Some(queue.get.put(65536, messageSubmitDelay, messageTimeToLive, serialize(durableMessage)).toInt)
@@ -51,8 +51,8 @@ class BeanstalkBasedMailbox(val owner: ActorRef) extends DurableExecutableMailbo
       } else null: MessageInvocation
     }
   } catch {
-    case e: Exception =>
-     EventHandler.error(e, this, "Beanstalk connection error")
+    case e: Exception ⇒
+      EventHandler.error(e, this, "Beanstalk connection error")
       reconnect(name)
       null: MessageInvocation
   }
@@ -65,7 +65,7 @@ class BeanstalkBasedMailbox(val owner: ActorRef) extends DurableExecutableMailbo
       queue.get.kick(100000)
       true
     } catch {
-      case e: Exception => false
+      case e: Exception ⇒ false
     }
   }
 
@@ -77,7 +77,8 @@ class BeanstalkBasedMailbox(val owner: ActorRef) extends DurableExecutableMailbo
   def isEmpty = size == 0
 
   private def connect(name: String): Client = {
-    @volatile var connected = false
+    @volatile
+    var connected = false
     var attempts = 0
     var client: Client = null
     while (!connected) {
@@ -88,12 +89,12 @@ class BeanstalkBasedMailbox(val owner: ActorRef) extends DurableExecutableMailbo
         client.watch(name)
         connected = true
       } catch {
-        case e: Exception =>
-         EventHandler.error(e, this, "Unable to connect to Beanstalk. Retrying in [%s] seconds: %s".format(reconnectWindow, e))
+        case e: Exception ⇒
+          EventHandler.error(e, this, "Unable to connect to Beanstalk. Retrying in [%s] seconds: %s".format(reconnectWindow, e))
           try {
             Thread.sleep(1000 * reconnectWindow)
           } catch {
-            case e: InterruptedException => {}
+            case e: InterruptedException ⇒ {}
           }
       }
     }

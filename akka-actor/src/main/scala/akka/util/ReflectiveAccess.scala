@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.util
@@ -23,6 +23,8 @@ import java.net.InetSocketAddress
 object ReflectiveAccess {
 
   val loader = getClass.getClassLoader
+  val emptyParams: Array[Class[_]] = Array()
+  val emptyArguments: Array[AnyRef] = Array()
 
   /**
    * Reflective access to the Cluster module.
@@ -30,12 +32,12 @@ object ReflectiveAccess {
    * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
    */
   object ClusterModule {
-    lazy val isEnabled = clusterInstance.isDefined
+    lazy val isEnabled = Config.isClusterEnabled && clusterInstance.isDefined
 
     def ensureEnabled() {
       if (!isEnabled) {
         val e = new ModuleNotAvailableException(
-          "Can't load the cluster module, make sure that akka-cluster.jar is on the classpath")
+          "Can't load the cluster module, make sure it is enabled in the config ('akka.enabled-modules = [\"cluster\"])' and that akka-cluster.jar is on the classpath")
         EventHandler.debug(this, e.toString)
         throw e
       }
@@ -48,14 +50,7 @@ object ReflectiveAccess {
         None
     }
 
-    lazy val clusterDeployerInstance: Option[ClusterDeployer] = getObjectFor("akka.cluster.ClusterDeployer$") match {
-      case Right(value) ⇒ Some(value)
-      case Left(exception) ⇒
-        EventHandler.debug(this, exception.toString)
-        None
-    }
-
-    lazy val serializerClass: Option[Class[_]] = getClassFor("akka.serialization.Serializer") match {
+    lazy val clusterDeployerInstance: Option[ActorDeployer] = getObjectFor("akka.cluster.ClusterDeployer$") match {
       case Right(value) ⇒ Some(value)
       case Left(exception) ⇒
         EventHandler.debug(this, exception.toString)
@@ -74,7 +69,7 @@ object ReflectiveAccess {
       clusterInstance.get.node
     }
 
-    lazy val clusterDeployer: ClusterDeployer = {
+    lazy val clusterDeployer: ActorDeployer = {
       ensureEnabled()
       clusterDeployerInstance.get
     }
@@ -82,15 +77,6 @@ object ReflectiveAccess {
     lazy val transactionLog: TransactionLogObject = {
       ensureEnabled()
       transactionLogInstance.get
-    }
-
-    type ClusterDeployer = {
-      def init(deployments: List[Deploy])
-      def shutdown()
-      def deploy(deployment: Deploy)
-      def undeploy(deployment: Deploy)
-      def undeployAll()
-      def lookupDeploymentFor(address: String): Option[Deploy]
     }
 
     type Cluster = {
@@ -102,34 +88,28 @@ object ReflectiveAccess {
       def dequeue: MessageInvocation
     }
 
-    type Serializer = {
-      def toBinary(obj: AnyRef): Array[Byte]
-      def fromBinary(bytes: Array[Byte], clazz: Option[Class[_]]): AnyRef
-    }
-
     type TransactionLogObject = {
       def newLogFor(
         id: String,
         isAsync: Boolean,
-        replicationScheme: ReplicationScheme,
-        format: Serializer): TransactionLog
+        replicationScheme: ReplicationScheme): TransactionLog
 
       def logFor(
         id: String,
         isAsync: Boolean,
-        replicationScheme: ReplicationScheme,
-        format: Serializer): TransactionLog
+        replicationScheme: ReplicationScheme): TransactionLog
 
       def shutdown()
     }
 
     type TransactionLog = {
-      def recordEntry(messageHandle: MessageInvocation, actorRef: ActorRef)
+      def recordEntry(messageHandle: MessageInvocation, actorRef: LocalActorRef)
       def recordEntry(entry: Array[Byte])
       def recordSnapshot(snapshot: Array[Byte])
       def entries: Vector[Array[Byte]]
       def entriesFromLatestSnapshot: Tuple2[Array[Byte], Vector[Array[Byte]]]
       def entriesInRange(from: Long, to: Long): Vector[Array[Byte]]
+      def latestSnapshotAndSubsequentEntries: (Option[Array[Byte]], Vector[Array[Byte]])
       def latestEntryId: Long
       def latestSnapshotId: Long
       def delete()

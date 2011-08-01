@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.event
@@ -26,7 +26,7 @@ import akka.AkkaException
  *     case EventHandler.Info(instance, message)         ⇒ ...
  *     case EventHandler.Debug(instance, message)        ⇒ ...
  *     case genericEvent                                 ⇒ ...
- *   }
+ * }
  * })
  *
  * EventHandler.addListener(eventHandlerListener)
@@ -112,8 +112,8 @@ object EventHandler extends ListenerManagement {
       defaultListeners foreach { listenerName ⇒
         try {
           ReflectiveAccess.getClassFor[Actor](listenerName) match {
-            case r: Right[_, Class[Actor]] ⇒ addListener(Actor.localActorOf(r.b).start())
-            case l: Left[Exception, _]     ⇒ throw l.a
+            case Right(actorClass) ⇒ addListener(Actor.localActorOf(actorClass).start())
+            case Left(exception)   ⇒ throw exception
           }
         } catch {
           case e: Exception ⇒
@@ -210,6 +210,7 @@ object EventHandler extends ListenerManagement {
   }
 
   class DefaultListener extends Actor {
+
     import java.text.SimpleDateFormat
     import java.util.Date
 
@@ -220,7 +221,7 @@ object EventHandler extends ListenerManagement {
     def timestamp = dateFormat.format(new Date)
 
     def receive = {
-      case event@Error(cause, instance, message) ⇒
+      case event @ Error(cause, instance, message) ⇒
         println(error.format(
           timestamp,
           event.thread.getName,
@@ -228,21 +229,21 @@ object EventHandler extends ListenerManagement {
           message,
           stackTraceFor(cause)))
 
-      case event@Warning(instance, message) ⇒
+      case event @ Warning(instance, message) ⇒
         println(warning.format(
           timestamp,
           event.thread.getName,
           instance.getClass.getSimpleName,
           message))
 
-      case event@Info(instance, message) ⇒
+      case event @ Info(instance, message) ⇒
         println(info.format(
           timestamp,
           event.thread.getName,
           instance.getClass.getSimpleName,
           message))
 
-      case event@Debug(instance, message) ⇒
+      case event @ Debug(instance, message) ⇒
         println(debug.format(
           timestamp,
           event.thread.getName,

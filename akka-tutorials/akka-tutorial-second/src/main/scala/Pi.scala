@@ -1,17 +1,15 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.tutorial.second
 
 import akka.actor.Actor._
-import akka.routing.{Routing, CyclicIterator}
-import Routing._
+import akka.routing.Routing
 import akka.event.EventHandler
-import akka.actor.{Channel, Actor, PoisonPill}
-import akka.dispatch.Future
-
-import System.{currentTimeMillis => now}
+import System.{ currentTimeMillis ⇒ now }
+import akka.routing.Routing.Broadcast
+import akka.actor.{ Timeout, Channel, Actor, PoisonPill }
 
 object Pi extends App {
 
@@ -30,16 +28,16 @@ object Pi extends App {
   // ==================
   class Worker() extends Actor {
     // define the work
-    val calculatePiFor = (arg: Int, nrOfElements: Int) => {
+    val calculatePiFor = (arg: Int, nrOfElements: Int) ⇒ {
       val range = (arg * nrOfElements) to ((arg + 1) * nrOfElements - 1)
       var acc = 0.0D
-      range foreach (i => acc += 4 * math.pow(-1, i) / (2 * i + 1))
+      range foreach (i ⇒ acc += 4 * math.pow(-1, i) / (2 * i + 1))
       acc
       //range map (j => 4 * math.pow(-1, j) / (2 * j + 1)) sum
     }
 
     def receive = {
-      case Work(arg, nrOfElements) =>
+      case Work(arg, nrOfElements) ⇒
         self reply Result(calculatePiFor(arg, nrOfElements)) // perform the work
     }
   }
@@ -55,13 +53,13 @@ object Pi extends App {
     val workers = Vector.fill(nrOfWorkers)(actorOf[Worker].start())
 
     // wrap them with a load-balancing router
-    val router = Routing.loadBalancerActor(CyclicIterator(workers)).start()
+    val router = Routing.actorOfWithRoundRobin("pi", workers)
 
     // phase 1, can accept a Calculate message
     def scatter: Receive = {
-      case Calculate =>
+      case Calculate ⇒
         // schedule work
-        for (arg <- 0 until nrOfMessages) router ! Work(arg, nrOfElements)
+        for (arg ← 0 until nrOfMessages) router ! Work(arg, nrOfElements)
 
         //Assume the gathering behavior
         this become gather(self.channel)
@@ -69,7 +67,7 @@ object Pi extends App {
 
     // phase 2, aggregate the results of the Calculation
     def gather(recipient: Channel[Any]): Receive = {
-      case Result(value) =>
+      case Result(value) ⇒
         // handle result from the worker
         pi += value
         nrOfResults += 1
@@ -104,11 +102,11 @@ object Pi extends App {
     val start = now
 
     //send calculate message
-    master.?(Calculate, Actor.Timeout(60000)).
-      await.resultOrException match {//wait for the result, with a 60 seconds timeout
-        case Some(pi) =>
+    master.?(Calculate, Timeout(60000)).
+      await.resultOrException match { //wait for the result, with a 60 seconds timeout
+        case Some(pi) ⇒
           EventHandler.info(this, "\n\tPi estimate: \t\t%s\n\tCalculation time: \t%s millis".format(pi, (now - start)))
-        case None =>
+        case None ⇒
           EventHandler.error(this, "Pi calculation did not complete within the timeout.")
       }
   }

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.config
@@ -10,8 +10,13 @@ import java.net.InetAddress
 
 import com.eaio.uuid.UUID
 
-class ConfigurationException(message: String, cause: Throwable = null) extends AkkaException(message, cause)
-class ModuleNotAvailableException(message: String, cause: Throwable = null) extends AkkaException(message, cause)
+class ConfigurationException(message: String, cause: Throwable = null) extends AkkaException(message, cause) {
+  def this(msg: String) = this(msg, null);
+}
+
+class ModuleNotAvailableException(message: String, cause: Throwable = null) extends AkkaException(message, cause) {
+  def this(msg: String) = this(msg, null);
+}
 
 /**
  * Loads up the configuration (from the akka.conf file).
@@ -96,6 +101,8 @@ object Config {
 
   val TIME_UNIT = config.getString("akka.time-unit", "seconds")
 
+  val isClusterEnabled = config.getList("akka.enabled-modules").exists(_ == "cluster")
+
   lazy val nodename = System.getProperty("akka.cluster.nodename") match {
     case null | "" ⇒ new UUID().toString
     case value     ⇒ value
@@ -119,12 +126,4 @@ object Config {
 
   val startTime = System.currentTimeMillis
   def uptime = (System.currentTimeMillis - startTime) / 1000
-
-  val serializers = config.getSection("akka.actor.serializers").map(_.map).getOrElse(Map("default" -> "akka.serialization.JavaSerializer"))
-
-  val bindings = config.getSection("akka.actor.serialization-bindings")
-    .map(_.map)
-    .map(m ⇒ Map() ++ m.map { case (k, v: List[String]) ⇒ Map() ++ v.map((_, k)) }.flatten)
-
-  val serializerMap = bindings.map(m ⇒ m.map { case (k, v: String) ⇒ (k, serializers(v)) }).getOrElse(Map())
 }

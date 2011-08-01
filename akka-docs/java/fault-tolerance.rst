@@ -117,7 +117,7 @@ The Actor’s supervision can be declaratively defined by creating a ‘Supervis
   import static akka.config.Supervision.*;
   import static akka.actor.Actors.*;
 
-  Supervisor supervisor = new Supervisor(
+  Supervisor supervisor = Supervisor.apply(
     new SupervisorConfig(
       new AllForOneStrategy(new Class[]{Exception.class}, 3, 5000),
       new Supervise[] {
@@ -141,13 +141,14 @@ MaximumNumberOfRestartsWithinTimeRangeReached message.
   import static akka.actor.Actors.*;
   import akka.event.JavaEventHandler;
 
-   Procedure2<ActorRef, MaximumNumberOfRestartsWithinTimeRangeReached> handler = new Procedure2<ActorRef, MaximumNumberOfRestartsWithinTimeRangeReached>() {
-            public void apply(ActorRef ref, MaximumNumberOfRestartsWithinTimeRangeReached max) {
-                JavaEventHandler.error(ref, max);
-            }
-        };
+   Procedure2<ActorRef, MaximumNumberOfRestartsWithinTimeRangeReached> handler =
+     new Procedure2<ActorRef, MaximumNumberOfRestartsWithinTimeRangeReached>() {
+       public void apply(ActorRef ref, MaximumNumberOfRestartsWithinTimeRangeReached max) {
+         JavaEventHandler.error(ref, max);
+       }
+     };
 
-  Supervisor supervisor = new Supervisor(
+  Supervisor supervisor = Supervisor.apply(
     new SupervisorConfig(
       new AllForOneStrategy(new Class[]{Exception.class}, 3, 5000),
       new Supervise[] {
@@ -165,7 +166,7 @@ You can link and unlink actors from a declaratively defined supervisor using the
 
 .. code-block:: java
 
-  Supervisor supervisor = new Supervisor(...);
+  Supervisor supervisor = Supervisor.apply(...);
   supervisor.link(..);
   supervisor.unlink(..);
 
@@ -209,7 +210,7 @@ Here is an example:
   import static akka.config.Supervision.*;
   import static akka.actor.Actors.*;
 
-  Supervisor supervisor = new Supervisor(
+  Supervisor supervisor = Supervisor.apply(
     new SupervisorConfig(
       new AllForOneStrategy(new Class[]{Exception.class}, 3, 5000),
       new Supervise[] {
@@ -249,7 +250,7 @@ A child actor can tell the supervising actor to unlink him by sending him the 'U
 .. code-block:: java
 
   ActorRef supervisor = getContext().getSupervisor();
-  if (supervisor != null) supervisor.sendOneWay(new Unlink(getContext()))
+  if (supervisor != null) supervisor.tell(new Unlink(getContext()))
 
 The supervising actor's side of things
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -341,22 +342,22 @@ Supervised actors have the option to reply to the initial sender within preResta
           // do something that may throw an exception
           // ...
 
-          getContext().replySafe("ok");
+          getContext().tryReply("ok");
       }
 
       @Override
       public void preRestart(Throwable reason) {
-          getContext().replySafe(reason.getMessage());
+          getContext().tryReply(reason.getMessage());
       }
 
       @Override
       public void postStop() {
-          getContext().replySafe("stopped by supervisor");
+          getContext().tryReply("stopped by supervisor");
       }
   }
 
-- A reply within preRestart or postRestart must be a safe reply via getContext().replySafe() because a getContext().replyUnsafe() will throw an exception when the actor is restarted without having failed. This can be the case in context of AllForOne restart strategies.
-- A reply within postStop must be a safe reply via getContext().replySafe() because a getContext().replyUnsafe() will throw an exception when the actor has been stopped by the application (and not by a supervisor) after successful execution of receive (or no execution at all).
+- A reply within preRestart or postRestart must be a safe reply via getContext().tryReply() because a getContext().reply() will throw an exception when the actor is restarted without having failed. This can be the case in context of AllForOne restart strategies.
+- A reply within postStop must be a safe reply via getContext().tryReply() because a getContext().reply() will throw an exception when the actor has been stopped by the application (and not by a supervisor) after successful execution of receive (or no execution at all).
 
 Handling too many actor restarts within a specific time limit
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.dispatch
@@ -34,8 +34,7 @@ final case class FutureInvocation[T](future: Promise[T], function: () ⇒ T, cle
       case e ⇒
         EventHandler.error(e, this, e.getMessage)
         Left(e)
-    }
-    finally {
+    } finally {
       cleanup()
     })
   }
@@ -52,7 +51,7 @@ object MessageDispatcher {
 /**
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
-trait MessageDispatcher {
+abstract class MessageDispatcher {
 
   import MessageDispatcher._
 
@@ -67,6 +66,11 @@ trait MessageDispatcher {
    *  Creates and returns a mailbox for the given actor.
    */
   private[akka] def createMailbox(actorRef: ActorRef): AnyRef
+
+  /**
+   * Name of this dispatcher.
+   */
+  def name: String
 
   /**
    * Attaches the specified actorRef to this dispatcher
@@ -90,7 +94,7 @@ trait MessageDispatcher {
     dispatch(invocation)
   }
 
-  private[akka] final def dispatchFuture[T](block: () ⇒ T, timeout: Long): Future[T] = {
+  private[akka] final def dispatchFuture[T](block: () ⇒ T, timeout: Timeout): Future[T] = {
     futures.getAndIncrement()
     try {
       val future = new DefaultPromise[T](timeout)
@@ -127,6 +131,10 @@ trait MessageDispatcher {
       }
     }
 
+  /**
+   * Only "private[akka] for the sake of intercepting calls, DO NOT CALL THIS OUTSIDE OF THE DISPATCHER,
+   * and only call it under the dispatcher-guard, see "attach" for the only invocation
+   */
   private[akka] def register(actorRef: ActorRef) {
     if (actorRef.mailbox eq null)
       actorRef.mailbox = createMailbox(actorRef)
@@ -139,6 +147,10 @@ trait MessageDispatcher {
     }
   }
 
+  /**
+   * Only "private[akka] for the sake of intercepting calls, DO NOT CALL THIS OUTSIDE OF THE DISPATCHER,
+   * and only call it under the dispatcher-guard, see "detach" for the only invocation
+   */
   private[akka] def unregister(actorRef: ActorRef) = {
     if (uuids remove actorRef.uuid) {
       cleanUpMailboxFor(actorRef)

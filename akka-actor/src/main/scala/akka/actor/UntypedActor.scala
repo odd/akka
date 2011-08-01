@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -19,13 +19,13 @@ import akka.japi.{ Creator, Procedure }
  *        String msg = (String)message;
  *
  *        if (msg.equals("UseReply")) {
- *          // Reply to original sender of message using the 'replyUnsafe' method
- *          getContext().replyUnsafe(msg + ":" + getContext().getUuid());
+ *          // Reply to original sender of message using the 'reply' method
+ *          getContext().reply(msg + ":" + getContext().getUuid());
  *
  *        } else if (msg.equals("UseSender") && getContext().getSender().isDefined()) {
  *          // Reply to original sender of message using the sender reference
  *          // also passing along my own reference (the context)
- *          getContext().getSender().get().sendOneWay(msg, context);
+ *          getContext().getSender().get().tell(msg, context);
  *
  *        } else if (msg.equals("UseSenderFuture") && getContext().getSenderFuture().isDefined()) {
  *          // Reply to original sender of message using the sender future reference
@@ -33,7 +33,7 @@ import akka.japi.{ Creator, Procedure }
  *
  *        } else if (msg.equals("SendToSelf")) {
  *          // Send message to the actor itself recursively
- *          getContext().sendOneWay(msg)
+ *          getContext().tell(msg)
  *
  *        } else if (msg.equals("ForwardMessage")) {
  *          // Retreive an actor from the ActorRegistry by ID and get an ActorRef back
@@ -46,7 +46,7 @@ import akka.japi.{ Creator, Procedure }
  *    public static void main(String[] args) {
  *      ActorRef actor = Actors.actorOf(SampleUntypedActor.class);
  *      actor.start();
- *      actor.sendOneWay("SendToSelf");
+ *      actor.tell("SendToSelf");
  *      actor.stop();
  *    }
  *  }
@@ -102,7 +102,7 @@ abstract class UntypedActor extends Actor {
    * <p/>
    * Is called on a crashed Actor right BEFORE it is restarted to allow clean up of resources before Actor is terminated.
    */
-  override def preRestart(reason: Throwable) {}
+  override def preRestart(reason: Throwable, lastMessage: Option[Any]) {}
 
   /**
    * User overridable callback.

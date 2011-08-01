@@ -1,10 +1,11 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
 
 import DeploymentConfig._
+import akka.experimental
 import akka.dispatch._
 import akka.config._
 import Config._
@@ -13,7 +14,7 @@ import ReflectiveAccess._
 import akka.remoteinterface.RemoteSupport
 import akka.japi.{ Creator, Procedure }
 import akka.AkkaException
-import akka.serialization.{ Format, Serializer }
+import akka.serialization.{ Format, Serializer, Serialization }
 import akka.cluster.ClusterNode
 import akka.event.EventHandler
 import scala.collection.immutable.Stack
@@ -58,7 +59,7 @@ case object RevertHotSwap extends AutoReceivedMessage with LifeCycleMessage
 
 case class Restart(reason: Throwable) extends AutoReceivedMessage with LifeCycleMessage
 
-case class Exit(dead: ActorRef, killer: Throwable) extends AutoReceivedMessage with LifeCycleMessage
+case class Death(dead: ActorRef, killer: Throwable) extends AutoReceivedMessage with LifeCycleMessage
 
 case class Link(child: ActorRef) extends AutoReceivedMessage with LifeCycleMessage
 
@@ -79,12 +80,29 @@ case class MaximumNumberOfRestartsWithinTimeRangeReached(
   @BeanProperty lastExceptionCausingRestart: Throwable) extends LifeCycleMessage
 
 // Exceptions for Actors
-class ActorStartException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause)
-class IllegalActorStateException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause)
-class ActorKilledException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause)
-class ActorInitializationException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause)
-class ActorTimeoutException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause)
-class InvalidMessageException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause)
+class ActorStartException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause) {
+  def this(msg: String) = this(msg, null);
+}
+
+class IllegalActorStateException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause) {
+  def this(msg: String) = this(msg, null);
+}
+
+class ActorKilledException private[akka] (message: String, cause: Throwable) extends AkkaException(message, cause) {
+  def this(msg: String) = this(msg, null);
+}
+
+class ActorInitializationException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause) {
+  def this(msg: String) = this(msg, null);
+}
+
+class ActorTimeoutException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause) {
+  def this(msg: String) = this(msg, null);
+}
+
+class InvalidMessageException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause) {
+  def this(msg: String) = this(msg, null);
+}
 
 /**
  * This message is thrown by default when an Actors behavior doesn't match a message
@@ -104,6 +122,36 @@ object Status {
   sealed trait Status extends Serializable
   case object Success extends Status
   case class Failure(cause: Throwable) extends Status
+}
+
+case class Timeout(duration: Duration) {
+  def this(timeout: Long) = this(Duration(timeout, TimeUnit.MILLISECONDS))
+  def this(length: Long, unit: TimeUnit) = this(Duration(length, unit))
+}
+object Timeout {
+  /**
+   * The default timeout, based on the config setting 'akka.actor.timeout'
+   */
+  implicit val default = new Timeout(Actor.TIMEOUT)
+
+  /**
+   * A timeout with zero duration, will cause most requests to always timeout.
+   */
+  val zero = new Timeout(Duration.Zero)
+
+  /**
+   * A Timeout with infinite duration. Will never timeout. Use extreme caution with this
+   * as it may cause memory leaks, blocked threads, or may not even be supported by
+   * the receiver, which would result in an exception.
+   */
+  val never = new Timeout(Duration.Inf)
+
+  def apply(timeout: Long) = new Timeout(timeout)
+  def apply(length: Long, unit: TimeUnit) = new Timeout(length, unit)
+
+  implicit def durationToTimeout(duration: Duration) = new Timeout(duration)
+  implicit def intToTimeout(timeout: Int) = new Timeout(timeout)
+  implicit def longToTimeout(timeout: Long) = new Timeout(timeout)
 }
 
 /**
@@ -140,21 +188,7 @@ object Actor extends ListenerManagement {
     override def initialValue = Stack[ActorRef]()
   }
 
-  case class Timeout(duration: Duration) {
-    def this(timeout: Long) = this(Duration(timeout, TimeUnit.MILLISECONDS))
-    def this(length: Long, unit: TimeUnit) = this(Duration(length, unit))
-  }
-  object Timeout {
-    def apply(timeout: Long) = new Timeout(timeout)
-    def apply(length: Long, unit: TimeUnit) = new Timeout(length, unit)
-    implicit def durationToTimeout(duration: Duration) = new Timeout(duration)
-    implicit def intToTimeout(timeout: Int) = new Timeout(timeout)
-    implicit def longToTimeout(timeout: Long) = new Timeout(timeout)
-  }
-
   private[akka] val TIMEOUT = Duration(config.getInt("akka.actor.timeout", 5), TIME_UNIT).toMillis
-  val defaultTimeout = Timeout(TIMEOUT)
-  val noTimeoutGiven = Timeout(Long.MinValue)
   private[akka] val SERIALIZE_MESSAGES = config.getBool("akka.actor.serialize-messages", false)
 
   /**
@@ -325,7 +359,7 @@ object Actor extends ListenerManagement {
    * </pre>
    */
   def actorOf[T <: Actor](creator: ⇒ T, address: String): ActorRef = {
-    createActor(address, () ⇒ new LocalActorRef(() ⇒ creator, address, Transient))
+    createActor(address, () ⇒ new LocalActorRef(() ⇒ creator, address))
   }
 
   /**
@@ -337,7 +371,7 @@ object Actor extends ListenerManagement {
    * JAVA API
    */
   def actorOf[T <: Actor](creator: Creator[T]): ActorRef =
-    actorOf(creator, new UUID().toString)
+    actorOf(creator, newUuid().toString)
 
   /**
    * Creates an ActorRef out of the Actor. Allows you to pass in a factory (Creator<Actor>)
@@ -348,7 +382,7 @@ object Actor extends ListenerManagement {
    * JAVA API
    */
   def actorOf[T <: Actor](creator: Creator[T], address: String): ActorRef = {
-    createActor(address, () ⇒ new LocalActorRef(() ⇒ creator.create, address, Transient))
+    createActor(address, () ⇒ new LocalActorRef(() ⇒ creator.create, address))
   }
 
   def localActorOf[T <: Actor: Manifest]: ActorRef = {
@@ -360,7 +394,7 @@ object Actor extends ListenerManagement {
   }
 
   def localActorOf[T <: Actor](clazz: Class[T]): ActorRef = {
-    newLocalActorRef(clazz, new UUID().toString)
+    newLocalActorRef(clazz, newUuid().toString)
   }
 
   def localActorOf[T <: Actor](clazz: Class[T], address: String): ActorRef = {
@@ -368,16 +402,18 @@ object Actor extends ListenerManagement {
   }
 
   def localActorOf[T <: Actor](factory: ⇒ T): ActorRef = {
-    new LocalActorRef(() ⇒ factory, new UUID().toString, Transient)
+    new LocalActorRef(() ⇒ factory, newUuid().toString)
   }
 
   def localActorOf[T <: Actor](factory: ⇒ T, address: String): ActorRef = {
-    new LocalActorRef(() ⇒ factory, address, Transient)
+    new LocalActorRef(() ⇒ factory, address)
   }
 
   /**
    * Use to spawn out a block of code in an event-driven actor. Will shut actor down when
    * the block has been executed.
+   * <p/>
+   * Only to be used from Scala code.
    * <p/>
    * NOTE: If used from within an Actor then has to be qualified with 'Actor.spawn' since
    * there is a method 'spawn[ActorType]' in the Actor trait already.
@@ -385,7 +421,7 @@ object Actor extends ListenerManagement {
    * <pre>
    * import Actor.spawn
    *
-   * spawn  {
+   * spawn {
    *   ... // do stuff
    * }
    * </pre>
@@ -400,14 +436,18 @@ object Actor extends ListenerManagement {
     }).start() ! Spawn
   }
 
+  /**
+   * Creates an actor according to the deployment plan for the 'address'; local or clustered.
+   * If already created then it just returns it from the registry.
+   */
   private[akka] def createActor(address: String, actorFactory: () ⇒ ActorRef): ActorRef = {
     Address.validate(address)
     registry.actorFor(address) match { // check if the actor for the address is already in the registry
-      case Some(actorRef) ⇒ actorRef // it is -> return it
+      case Some(actorRef) ⇒ actorRef // it is     -> return it
       case None ⇒ // it is not -> create it
         try {
           Deployer.deploymentFor(address) match {
-            case Deploy(_, router, _, Local) ⇒ actorFactory() // create a local actor
+            case Deploy(_, _, router, Local) ⇒ actorFactory() // create a local actor
             case deploy                      ⇒ newClusterActorRef(actorFactory, address, deploy)
           }
         } catch {
@@ -435,41 +475,29 @@ object Actor extends ListenerManagement {
               "\nif so put it outside the class/trait, f.e. in a companion object," +
               "\nOR try to change: 'actorOf[MyActor]' to 'actorOf(new MyActor)'.", cause)
       }
-    }, address, Transient)
+    }, address)
   }
 
-  private def newClusterActorRef(factory: () ⇒ ActorRef, address: String, deploy: Deploy): ActorRef = {
+  private[akka] def newClusterActorRef(factory: () ⇒ ActorRef, address: String, deploy: Deploy): ActorRef =
     deploy match {
-      case Deploy(
-        configAdress, router, serializerClassName,
-        Clustered(
-          home,
-          replicas,
-          replication)) ⇒
+      case Deploy(configAddress, recipe, router, Clustered(preferredHomeNodes, replicas, replication)) ⇒
 
         ClusterModule.ensureEnabled()
 
-        if (configAdress != address) throw new IllegalStateException(
-          "Deployment config for [" + address + "] is wrong [" + deploy + "]")
-        if (!Actor.remote.isRunning) throw new IllegalStateException(
-          "Remote server is not running")
+        if (configAddress != address) throw new IllegalStateException("Deployment config for [" + address + "] is wrong [" + deploy + "]")
+        if (!remote.isRunning) throw new IllegalStateException("Remote server is not running")
 
-        val isHomeNode = DeploymentConfig.isHomeNode(home)
-        val nrOfReplicas = DeploymentConfig.replicaValueFor(replicas)
+        val isHomeNode = DeploymentConfig.isHomeNode(preferredHomeNodes)
 
-        def serializerErrorDueTo(reason: String) =
-          throw new akka.config.ConfigurationException(
-            "Could not create Serializer object [" + serializerClassName +
-              "] for serialization of actor [" + address +
-              "] since " + reason)
-
-        val serializer: Serializer =
-          akka.serialization.Serialization.serializerFor(this.getClass).fold(x ⇒ serializerErrorDueTo(x.toString), s ⇒ s)
+        val serializer = recipe match {
+          case Some(r) ⇒ Serialization.serializerFor(r.implementationClass)
+          case None    ⇒ Serialization.serializerFor(classOf[Actor]) //TODO revisit this decision of default
+        }
 
         def storeActorAndGetClusterRef(replicationScheme: ReplicationScheme, serializer: Serializer): ActorRef = {
           // add actor to cluster registry (if not already added)
-          if (!cluster.isClustered(address))
-            cluster.store(factory().start(), nrOfReplicas, replicationScheme, false, serializer)
+          if (!cluster.isClustered(address)) //WARNING!!!! Racy
+            cluster.store(address, factory, replicas.factor, replicationScheme, false, serializer)
 
           // remote node (not home node), check out as ClusterActorRef
           cluster.ref(address, DeploymentConfig.routerTypeFor(router))
@@ -480,22 +508,21 @@ object Actor extends ListenerManagement {
             storeActorAndGetClusterRef(Transient, serializer)
 
           case replication: Replication ⇒
+            if (DeploymentConfig.routerTypeFor(router) != akka.routing.RouterType.Direct) throw new ConfigurationException(
+              "Can't replicate an actor [" + address + "] configured with another router than \"direct\" - found [" + router + "]")
+
             if (isHomeNode) { // stateful actor's home node
-              cluster
-                .use(address, serializer)
+              cluster.use(address, serializer)
                 .getOrElse(throw new ConfigurationException(
                   "Could not check out actor [" + address + "] from cluster registry as a \"local\" actor"))
             } else {
-              // FIXME later manage different 'storage' (data grid) as well
               storeActorAndGetClusterRef(replication, serializer)
             }
         }
 
       case invalid ⇒ throw new IllegalActorStateException(
-        "Could not create actor with address [" + address +
-          "], not bound to a valid deployment scheme [" + invalid + "]")
+        "Could not create actor with address [" + address + "], not bound to a valid deployment scheme [" + invalid + "]")
     }
-  }
 }
 
 /**
@@ -658,9 +685,23 @@ trait Actor {
   /**
    * User overridable callback.
    * <p/>
-   * Is called on a crashed Actor right BEFORE it is restarted to allow clean up of resources before Actor is terminated.
+   * Is called on a crashed Actor right BEFORE it is restarted to allow clean
+   * up of resources before Actor is terminated.
    */
-  def preRestart(reason: Throwable) {}
+  def preRestart(reason: Throwable, message: Option[Any]) {}
+
+  /**
+   * User overridable callback.
+   * <p/>
+   * Is called on the crashed Actor to give it the option of producing the
+   * Actor's reincarnation. If it returns None, which is the default, the
+   * initially provided actor factory is used.
+   * <p/>
+   * <b>Warning:</b> <i>Propagating state from a crashed actor carries the risk
+   * of proliferating the cause of the error. Consider let-it-crash first.</i>
+   */
+  @experimental("1.2")
+  def freshInstance(): Option[Actor] = None
 
   /**
    * User overridable callback.
@@ -720,7 +761,7 @@ trait Actor {
     msg match {
       case HotSwap(code, discardOld) ⇒ become(code(self), discardOld)
       case RevertHotSwap             ⇒ unbecome()
-      case Exit(dead, reason)        ⇒ self.handleTrapExit(dead, reason)
+      case Death(dead, reason)       ⇒ self.handleTrapExit(dead, reason)
       case Link(child)               ⇒ self.link(child)
       case Unlink(child)             ⇒ self.unlink(child)
       case UnlinkAndStop(child)      ⇒ self.unlink(child); child.stop()

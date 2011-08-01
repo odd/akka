@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.serialization
@@ -20,6 +20,9 @@ import java.net.InetSocketAddress
 
 import com.google.protobuf.ByteString
 
+import com.eaio.uuid.UUID
+import akka.event.EventHandler
+
 /**
  * Module for local actor serialization.
  */
@@ -27,10 +30,13 @@ object ActorSerialization {
   implicit val defaultSerializer = akka.serialization.JavaSerializer // Format.Default
 
   def fromBinary[T <: Actor](bytes: Array[Byte], homeAddress: InetSocketAddress): ActorRef =
-    fromBinaryToLocalActorRef(bytes, Some(homeAddress))
+    fromBinaryToLocalActorRef(bytes, None, Some(homeAddress))
+
+  def fromBinary[T <: Actor](bytes: Array[Byte], uuid: UUID): ActorRef =
+    fromBinaryToLocalActorRef(bytes, Some(uuid), None)
 
   def fromBinary[T <: Actor](bytes: Array[Byte]): ActorRef =
-    fromBinaryToLocalActorRef(bytes, None)
+    fromBinaryToLocalActorRef(bytes, None, None)
 
   def toBinary[T <: Actor](
     a: ActorRef,
@@ -90,10 +96,10 @@ object ActorSerialization {
       if (actorRef.mailbox eq null) throw new IllegalActorStateException("Can't serialize an actor that has not been started.")
       val messages =
         actorRef.mailbox match {
-          case q: java.util.Queue[MessageInvocation] ⇒
+          case q: java.util.Queue[_] ⇒
             val l = new scala.collection.mutable.ListBuffer[MessageInvocation]
             val it = q.iterator
-            while (it.hasNext == true) l += it.next
+            while (it.hasNext) l += it.next.asInstanceOf[MessageInvocation]
             l
         }
 
@@ -126,13 +132,18 @@ object ActorSerialization {
 
   private def fromBinaryToLocalActorRef[T <: Actor](
     bytes: Array[Byte],
+    uuid: Option[UUID],
     homeAddress: Option[InetSocketAddress]): ActorRef = {
     val builder = SerializedActorRefProtocol.newBuilder.mergeFrom(bytes)
-    fromProtobufToLocalActorRef(builder.build, None)
+    fromProtobufToLocalActorRef(builder.build, uuid, None)
   }
 
   private[akka] def fromProtobufToLocalActorRef[T <: Actor](
-    protocol: SerializedActorRefProtocol, loader: Option[ClassLoader]): ActorRef = {
+    protocol: SerializedActorRefProtocol,
+    overriddenUuid: Option[UUID],
+    loader: Option[ClassLoader]): ActorRef = {
+
+    EventHandler.debug(this, "Deserializing SerializedActorRefProtocol to LocalActorRef:\n%s".format(protocol))
 
     val lifeCycle =
       if (protocol.hasLifeCycle) {
@@ -147,28 +158,27 @@ object ActorSerialization {
       if (protocol.hasSupervisor) Some(RemoteActorSerialization.fromProtobufToRemoteActorRef(protocol.getSupervisor, loader))
       else None
 
-    import ReplicationStorageType._
-    import ReplicationStrategyType._
-
-    val replicationScheme =
-      if (protocol.hasReplicationStorage) {
-        protocol.getReplicationStorage match {
-          case TRANSIENT ⇒ Transient
-          case store ⇒
-            val storage = store match {
-              case TRANSACTION_LOG ⇒ TransactionLog
-              case DATA_GRID       ⇒ DataGrid
-            }
-            val strategy = if (protocol.hasReplicationStrategy) {
-              protocol.getReplicationStrategy match {
-                case WRITE_THROUGH ⇒ WriteThrough
-                case WRITE_BEHIND  ⇒ WriteBehind
-              }
-            } else throw new IllegalActorStateException(
-              "Expected replication strategy for replication storage [" + storage + "]")
-            Replication(storage, strategy)
-        }
-      } else Transient
+    // import ReplicationStorageType._
+    // import ReplicationStrategyType._
+    // val replicationScheme =
+    //   if (protocol.hasReplicationStorage) {
+    //     protocol.getReplicationStorage match {
+    //       case TRANSIENT ⇒ Transient
+    //       case store ⇒
+    //         val storage = store match {
+    //           case TRANSACTION_LOG ⇒ TransactionLog
+    //           case DATA_GRID       ⇒ DataGrid
+    //         }
+    //         val strategy = if (protocol.hasReplicationStrategy) {
+    //           protocol.getReplicationStrategy match {
+    //             case WRITE_THROUGH ⇒ WriteThrough
+    //             case WRITE_BEHIND  ⇒ WriteBehind
+    //           }
+    //         } else throw new IllegalActorStateException(
+    //           "Expected replication strategy for replication storage [" + storage + "]")
+    //         Replication(storage, strategy)
+    //     }
+    //   } else Transient
 
     val hotswap =
       try {
@@ -197,16 +207,20 @@ object ActorSerialization {
       }
     }
 
+    val actorUuid = overriddenUuid match {
+      case Some(uuid) ⇒ uuid
+      case None       ⇒ uuidFrom(protocol.getUuid.getHigh, protocol.getUuid.getLow)
+    }
+
     val ar = new LocalActorRef(
-      uuidFrom(protocol.getUuid.getHigh, protocol.getUuid.getLow),
+      actorUuid,
       protocol.getAddress,
       if (protocol.hasTimeout) protocol.getTimeout else Actor.TIMEOUT,
       if (protocol.hasReceiveTimeout) Some(protocol.getReceiveTimeout) else None,
       lifeCycle,
       supervisor,
       hotswap,
-      factory,
-      replicationScheme)
+      factory)
 
     val messages = protocol.getMessagesList.toArray.toList.asInstanceOf[List[RemoteMessageProtocol]]
     messages.foreach(message ⇒ ar ! MessageSerializer.deserialize(message.getMessage, Some(classLoader)))
@@ -232,11 +246,17 @@ object RemoteActorSerialization {
    * Deserializes a RemoteActorRefProtocol Protocol Buffers (protobuf) Message into an RemoteActorRef instance.
    */
   private[akka] def fromProtobufToRemoteActorRef(protocol: RemoteActorRefProtocol, loader: Option[ClassLoader]): ActorRef = {
-    RemoteActorRef(
+    EventHandler.debug(this, "Deserializing RemoteActorRefProtocol to RemoteActorRef:\n %s".format(protocol))
+
+    val ref = RemoteActorRef(
       JavaSerializer.fromBinary(protocol.getInetSocketAddress.toByteArray, Some(classOf[InetSocketAddress]), loader).asInstanceOf[InetSocketAddress],
       protocol.getAddress,
       protocol.getTimeout,
       loader)
+
+    EventHandler.debug(this, "Newly deserialized RemoteActorRef has uuid: %s".format(ref.uuid))
+
+    ref
   }
 
   /**
@@ -252,6 +272,9 @@ object RemoteActorSerialization {
       case _ ⇒
         ReflectiveAccess.RemoteModule.configDefaultAddress
     }
+
+    EventHandler.debug(this, "Register serialized Actor [%s] as remote @ [%s]".format(actor.uuid, remoteAddress))
+
     RemoteActorRefProtocol.newBuilder
       .setInetSocketAddress(ByteString.copyFrom(JavaSerializer.toBinary(remoteAddress)))
       .setAddress(actor.address)

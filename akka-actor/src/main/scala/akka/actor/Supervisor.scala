@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -10,10 +10,11 @@ import ReflectiveAccess._
 import Actor._
 
 import java.util.concurrent.{ CopyOnWriteArrayList, ConcurrentHashMap }
-import java.net.InetSocketAddress
 import akka.config.Supervision._
 
-class SupervisorException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause)
+class SupervisorException private[akka] (message: String, cause: Throwable = null) extends AkkaException(message, cause) {
+  def this(msg: String) = this(msg, null);
+}
 
 /**
  * Factory object for creating supervisors declarative. It creates instances of the 'Supervisor' class.
@@ -39,6 +40,14 @@ class SupervisorException private[akka] (message: String, cause: Throwable = nul
  * <pre>
  * supervisor.link(child)
  * supervisor.unlink(child)
+ * </pre>
+ *
+ * If you are using it from Java you have to use <code>Supervisor.apply(..)</code> like in:
+ * <pre>
+ *   Supervisor supervisor = Supervisor.apply(
+ *     SupervisorConfig(
+ *       ..
+ *   ))
  * </pre>
  *
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
@@ -144,7 +153,7 @@ sealed class Supervisor(handler: FaultHandlingStrategy, maxRestartsHandler: (Act
             supervisor.link(actorRef)
             if (ClusterModule.isEnabled && registerAsRemoteService)
               Actor.remote.register(actorRef)
-          case supervisorConfig@SupervisorConfig(_, _, _) ⇒ // recursive supervisor configuration
+          case supervisorConfig @ SupervisorConfig(_, _, _) ⇒ // recursive supervisor configuration
             val childSupervisor = Supervisor(supervisorConfig)
             supervisor.link(childSupervisor.supervisor)
             _childSupervisors.add(childSupervisor)
@@ -170,7 +179,7 @@ final class SupervisorActor private[akka] (handler: FaultHandlingStrategy, maxRe
   }
 
   def receive = {
-    case max@MaximumNumberOfRestartsWithinTimeRangeReached(_, _, _, _) ⇒ maxRestartsHandler(self, max)
+    case max @ MaximumNumberOfRestartsWithinTimeRangeReached(_, _, _, _) ⇒ maxRestartsHandler(self, max)
     case unknown ⇒ throw new SupervisorException(
       "SupervisorActor can not respond to messages.\n\tUnknown message [" + unknown + "]")
   }

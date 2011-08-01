@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.actor
 
@@ -21,7 +21,7 @@ class ActorTimeoutSpec
     }
   }).start()
 
-  val testTimeout = if (Actor.defaultTimeout.duration < 400.millis) 500 millis else 100 millis
+  val testTimeout = if (Timeout.default.duration < 400.millis) 500 millis else 100 millis
 
   override def afterAll { echo.stop() }
 
@@ -36,7 +36,7 @@ class ActorTimeoutSpec
     }
 
     "use implicitly supplied timeout" in {
-      implicit val timeout = Actor.Timeout(testTimeout)
+      implicit val timeout = Timeout(testTimeout)
       within(testTimeout - 100.millis, testTimeout + 300.millis) {
         val f = (echo ? "hallo").mapTo[String]
         intercept[FutureTimeoutException] { f.await }

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.actor
 
@@ -8,6 +8,7 @@ import org.scalatest.matchers.MustMatchers
 
 import akka.util.duration._
 import akka.testkit.Testing.sleepFor
+import akka.testkit.{ EventFilter, filterEvents, filterException }
 import akka.dispatch.Dispatchers
 import akka.config.Supervision.{ SupervisorConfig, OneForOneStrategy, Supervise, Permanent }
 import Actor._
@@ -25,7 +26,7 @@ class SupervisorTreeSpec extends WordSpec with MustMatchers {
       case Die ⇒ throw new Exception(self.address + " is dying...")
     }
 
-    override def preRestart(reason: Throwable) {
+    override def preRestart(reason: Throwable, msg: Option[Any]) {
       log += self.address
     }
   }
@@ -33,15 +34,17 @@ class SupervisorTreeSpec extends WordSpec with MustMatchers {
   "In a 3 levels deep supervisor tree (linked in the constructor) we" must {
 
     "be able to kill the middle actor and see itself and its child restarted" in {
-      log = "INIT"
+      filterException[Exception] {
+        log = "INIT"
 
-      val lastActor = actorOf(new Chainer, "lastActor").start
-      val middleActor = actorOf(new Chainer(Some(lastActor)), "middleActor").start
-      val headActor = actorOf(new Chainer(Some(middleActor)), "headActor").start
+        val lastActor = actorOf(new Chainer, "lastActor").start
+        val middleActor = actorOf(new Chainer(Some(lastActor)), "middleActor").start
+        val headActor = actorOf(new Chainer(Some(middleActor)), "headActor").start
 
-      middleActor ! Die
-      sleepFor(500 millis)
-      log must equal("INITmiddleActorlastActor")
+        middleActor ! Die
+        sleepFor(500 millis)
+        log must equal("INITmiddleActorlastActor")
+      }
     }
   }
 }

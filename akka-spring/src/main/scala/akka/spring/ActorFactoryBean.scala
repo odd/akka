@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ *  Copyright (C) 2009-2010 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.spring
@@ -36,7 +36,6 @@ class AkkaBeansException(message: String, cause: Throwable) extends BeansExcepti
  * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
 class ActorFactoryBean extends AbstractFactoryBean[AnyRef] with ApplicationContextAware {
-  import StringReflect._
   import AkkaSpringConfigurationTags._
   @BeanProperty
   var id: String = ""
@@ -242,7 +241,6 @@ class ActorFactoryBean extends AbstractFactoryBean[AnyRef] with ApplicationConte
  * @author michaelkober
  */
 class ActorForFactoryBean extends AbstractFactoryBean[AnyRef] with ApplicationContextAware {
-  import StringReflect._
   import AkkaSpringConfigurationTags._
 
   @BeanProperty

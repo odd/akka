@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.testkit
 
@@ -32,7 +32,7 @@ import scala.annotation.tailrec
 
 object CallingThreadDispatcher {
 
-  lazy val global = new CallingThreadDispatcher
+  lazy val global = new CallingThreadDispatcher("global-calling-thread")
 
   // PRIVATE DATA
 
@@ -104,7 +104,7 @@ object CallingThreadDispatcher {
  * @author Roland Kuhn
  * @since 1.1
  */
-class CallingThreadDispatcher(val warnings: Boolean = true) extends MessageDispatcher {
+class CallingThreadDispatcher(val name: String = "calling-thread", val warnings: Boolean = true) extends MessageDispatcher {
   import CallingThreadDispatcher._
 
   private[akka] override def createMailbox(actor: ActorRef) = new CallingThreadMailbox
@@ -140,7 +140,7 @@ class CallingThreadDispatcher(val warnings: Boolean = true) extends MessageDispa
   private[akka] override def dispatch(handle: MessageInvocation) {
     val mbox = getMailbox(handle.receiver)
     val queue = mbox.queue
-    val execute = mbox.suspended.ifElseYield {
+    val execute = mbox.suspended.fold {
       queue.push(handle)
       if (warnings && handle.channel.isInstanceOf[Promise[_]]) {
         EventHandler.warning(this, "suspended, creating Future could deadlock; target: %s" format handle.receiver)
@@ -177,7 +177,7 @@ class CallingThreadDispatcher(val warnings: Boolean = true) extends MessageDispa
     assert(queue.isActive)
     mbox.lock.lock
     val recurse = try {
-      val handle = mbox.suspended.ifElseYield[MessageInvocation] {
+      val handle = mbox.suspended.fold[MessageInvocation] {
         queue.leave
         null
       } {

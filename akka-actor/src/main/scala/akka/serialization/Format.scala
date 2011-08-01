@@ -1,7 +1,7 @@
 package akka.serialization
 
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 import akka.actor.Actor
@@ -43,6 +43,9 @@ import java.io.{ ObjectOutputStream, ByteArrayOutputStream, ObjectInputStream, B
  * in.close()
  * obj
  * }
+ *
+ * def identifier: Byte = 111 //Pick a number and hope no one has chosen the same :-) 0 - 16 is reserved for Akka internals
+ *
  * }
  *
  * val defaultSerializerName = Default.getClass.getName

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.transactor
@@ -28,10 +28,10 @@ abstract class UntypedTransactor extends UntypedActor {
   @throws(classOf[Exception])
   final def onReceive(message: Any): Unit = {
     message match {
-      case coordinated@Coordinated(message) ⇒ {
+      case coordinated @ Coordinated(message) ⇒ {
         val others = coordinate(message)
         for (sendTo ← others) {
-          sendTo.actor.sendOneWay(coordinated(sendTo.message.getOrElse(message)))
+          sendTo.actor.tell(coordinated(sendTo.message.getOrElse(message)))
         }
         before(message)
         coordinated.atomic(txFactory) { atomically(message) }

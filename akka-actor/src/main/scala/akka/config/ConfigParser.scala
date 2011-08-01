@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  *
  * Based on Configgy by Robey Pointer.
  *   Copyright 2009 Robey Pointer <robeypointer@gmail.com>
@@ -66,9 +66,9 @@ class ConfigParser(var prefix: String = "", map: mutable.Map[String, Any] = muta
 
   def parse(in: String): Map[String, Any] = {
     parseAll(root, in) match {
-      case Success(result, _) ⇒ map.toMap
-      case x@Failure(msg, _)  ⇒ throw new ConfigurationException(x.toString)
-      case x@Error(msg, _)    ⇒ throw new ConfigurationException(x.toString)
+      case Success(result, _)  ⇒ map.toMap
+      case x @ Failure(msg, _) ⇒ throw new ConfigurationException(x.toString)
+      case x @ Error(msg, _)   ⇒ throw new ConfigurationException(x.toString)
     }
   }
 }

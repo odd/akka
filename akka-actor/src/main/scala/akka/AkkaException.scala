@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka
@@ -25,6 +25,8 @@ class AkkaException(message: String = "", cause: Throwable = null) extends Runti
 
   lazy val toLongString =
     "%s: %s\n[%s]\n%s".format(getClass.getName, message, uuid, stackTraceToString)
+
+  def this(msg: String) = this(msg, null);
 
   def stackTraceToString = {
     val trace = getStackTrace

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  *
  * Based on Configgy by Robey Pointer.
  *   Copyright 2009 Robey Pointer <robeypointer@gmail.com>
@@ -64,7 +64,6 @@ class Configuration(val map: Map[String, Any]) {
   private def outputIfDesiredAndReturnInput[T](key: String, t: T): T = {
     if (Configuration.outputConfigSources)
       println("Akka config is using default value for: " + key)
-
     t
   }
 
@@ -170,13 +169,19 @@ class Configuration(val map: Map[String, Any]) {
   }
 
   def apply(key: String, defaultValue: String) = getString(key, defaultValue)
+
   def apply(key: String, defaultValue: Int) = getInt(key, defaultValue)
+
   def apply(key: String, defaultValue: Long) = getLong(key, defaultValue)
+
   def apply(key: String, defaultValue: Boolean) = getBool(key, defaultValue)
 
   def getSection(name: String): Option[Configuration] = {
     val l = name.length + 1
-    val m = map.collect { case (k, v) if k.startsWith(name) ⇒ (k.substring(l), v) }
+    val pattern = name + "."
+    val m = map.collect {
+      case (k, v) if k.startsWith(pattern) ⇒ (k.substring(l), v)
+    }
     if (m.isEmpty) None
     else Some(new Configuration(m))
   }

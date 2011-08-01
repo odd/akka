@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -47,6 +47,8 @@ trait BootableActorLoaderService extends Bootable {
 
   abstract override def onLoad = {
     super.onLoad
+
+    applicationLoader foreach Thread.currentThread.setContextClassLoader
 
     for (loader ← applicationLoader; clazz ← BOOT_CLASSES) {
       loader.loadClass(clazz).newInstance

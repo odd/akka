@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ *  Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.cluster.zookeeper
 
@@ -62,6 +62,14 @@ class ZooKeeperBarrier(zkClient: ZkClient, name: String, node: String, count: In
   def apply(body: ⇒ Unit) {
     enter
     body
+    leave()
+  }
+
+  /**
+   * An await does a enter/leave making this barrier a 'single' barrier instead of a double barrier.
+   */
+  def await() {
+    enter
     leave()
   }
 

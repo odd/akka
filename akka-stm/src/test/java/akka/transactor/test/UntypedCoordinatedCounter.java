@@ -40,7 +40,7 @@ public class UntypedCoordinatedCounter extends UntypedActor {
                 final CountDownLatch latch = increment.getLatch();
                 if (!friends.isEmpty()) {
                     Increment coordMessage = new Increment(friends.subList(1, friends.size()), latch);
-                    friends.get(0).sendOneWay(coordinated.coordinate(coordMessage));
+                    friends.get(0).tell(coordinated.coordinate(coordMessage));
                 }
                 coordinated.atomic(new Atomically(txFactory) {
                     public void atomically() {
@@ -57,7 +57,7 @@ public class UntypedCoordinatedCounter extends UntypedActor {
         } else if (incoming instanceof String) {
             String message = (String) incoming;
             if (message.equals("GetCount")) {
-                getContext().replyUnsafe(count.get());
+                getContext().reply(count.get());
             }
         }
     }

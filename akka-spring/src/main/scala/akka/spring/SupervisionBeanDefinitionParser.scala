@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2010 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.spring
 
@@ -71,7 +71,6 @@ class SupervisionBeanDefinitionParser extends AbstractSingleBeanDefinitionParser
   }
 
   private def parseTrapExits(element: Element): Array[Class[_ <: Throwable]] = {
-    import StringReflect._
     val trapExits = DomUtils.getChildElementsByTagName(element, TRAP_EXIT_TAG).toArray.toList.asInstanceOf[List[Element]]
     trapExits.map(DomUtils.getTextValue(_).toClass.asInstanceOf[Class[_ <: Throwable]]).toArray
   }

@@ -107,7 +107,7 @@ Send messages
 -------------
 
 Messages are sent to an Actor through one of the 'send' methods.
-* 'sendOneWay' means “fire-and-forget”, e.g. send a message asynchronously and return immediately.
+* 'tell' means “fire-and-forget”, e.g. send a message asynchronously and return immediately.
 * 'sendRequestReply' means “send-and-reply-eventually”, e.g. send a message asynchronously and wait for a reply through a Future. Here you can specify a timeout. Using timeouts is very important. If no timeout is specified then the actor’s default timeout (set by the 'getContext().setTimeout(..)' method in the 'ActorRef') is used. This method throws an 'ActorTimeoutException' if the call timed out.
 * 'ask' sends a message asynchronously and returns a 'Future'.
 
@@ -120,13 +120,13 @@ This is the preferred way of sending messages. No blocking waiting for a message
 
 .. code-block:: java
 
-  actor.sendOneWay("Hello");
+  actor.tell("Hello");
 
 Or with the sender reference passed along:
 
 .. code-block:: java
 
-  actor.sendOneWay("Hello", getContext());
+  actor.tell("Hello", getContext());
 
 If invoked from within an Actor, then the sending actor reference will be implicitly passed along with the message and available to the receiving Actor in its 'getContext().getSender();' method. He can use this to reply to the original sender or use the 'getContext().reply(message);' method.
 
@@ -231,7 +231,7 @@ Reply using the channel
 
 If you want to have a handle to an object to whom you can reply to the message, you can use the Channel abstraction.
 Simply call getContext().channel() and then you can forward that to others, store it away or otherwise until you want to reply,
-which you do by Channel.sendOneWay(msg)
+which you do by Channel.tell(msg)
 
 .. code-block:: java
 
@@ -240,17 +240,17 @@ which you do by Channel.sendOneWay(msg)
       String msg = (String)message;
       if (msg.equals("Hello")) {
         // Reply to original sender of message using the channel
-        getContext().channel().sendOneWaySafe(msg + " from " + getContext().getUuid());
+        getContext().channel().tellSafe(msg + " from " + getContext().getUuid());
       }
     }
   }
 
 We recommend that you as first choice use the channel abstraction instead of the other ways described in the following sections.
 
-Reply using the 'replySafe' and 'replyUnsafe' methods
+Reply using the 'tryReply' and 'reply' methods
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you want to send a message back to the original sender of the message you just received then you can use the 'getContext().replyUnsafe(..)' method.
+If you want to send a message back to the original sender of the message you just received then you can use the 'getContext().reply(..)' method.
 
 .. code-block:: java
 
@@ -258,15 +258,15 @@ If you want to send a message back to the original sender of the message you jus
     if (message instanceof String) {
       String msg = (String)message;
       if (msg.equals("Hello")) {
-        // Reply to original sender of message using the 'replyUnsafe' method
-        getContext().replyUnsafe(msg + " from " + getContext().getUuid());
+        // Reply to original sender of message using the 'reply' method
+        getContext().reply(msg + " from " + getContext().getUuid());
       }
     }
   }
 
 In this case we will a reply back to the Actor that sent the message.
 
-The 'replyUnsafe' method throws an 'IllegalStateException' if unable to determine what to reply to, e.g. the sender has not been passed along with the message when invoking one of 'send*' methods. You can also use the more forgiving 'replySafe' method which returns 'true' if reply was sent, and 'false' if unable to determine what to reply to.
+The 'reply' method throws an 'IllegalStateException' if unable to determine what to reply to, e.g. the sender has not been passed along with the message when invoking one of 'send*' methods. You can also use the more forgiving 'tryReply' method which returns 'true' if reply was sent, and 'false' if unable to determine what to reply to.
 
 .. code-block:: java
 
@@ -274,8 +274,8 @@ The 'replyUnsafe' method throws an 'IllegalStateException' if unable to determin
     if (message instanceof String) {
       String msg = (String)message;
       if (msg.equals("Hello")) {
-        // Reply to original sender of message using the 'replyUnsafe' method
-        if (getContext().replySafe(msg + " from " + getContext().getUuid())) ... // success
+        // Reply to original sender of message using the 'reply' method
+        if (getContext().tryReply(msg + " from " + getContext().getUuid())) ... // success
         else ... // handle failure
       }
     }
@@ -373,7 +373,7 @@ Use it like this:
 
   import static akka.actor.Actors.*;
   
-  actor.sendOneWay(poisonPill());
+  actor.tell(poisonPill());
 
 Killing an Actor
 ----------------
@@ -387,7 +387,7 @@ Use it like this:
   import static akka.actor.Actors.*;
 
   // kill the actor called 'victim'
-   victim.sendOneWay(kill());
+   victim.tell(kill());
 
 Actor life-cycle
 ----------------

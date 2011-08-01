@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.tutorial.java.second;
@@ -8,6 +8,8 @@ import static akka.actor.Actors.actorOf;
 import static akka.actor.Actors.poisonPill;
 import static java.lang.System.currentTimeMillis;
 import static java.util.Arrays.asList;
+
+import akka.routing.Routing;
 import scala.Option;
 import akka.actor.ActorRef;
 import akka.actor.Channel;
@@ -15,10 +17,10 @@ import akka.actor.UntypedActor;
 import akka.actor.UntypedActorFactory;
 import akka.dispatch.Future;
 import akka.japi.Procedure;
-import akka.routing.CyclicIterator;
-import akka.routing.InfiniteIterator;
 import akka.routing.Routing.Broadcast;
-import akka.routing.UntypedLoadBalancer;
+import scala.collection.JavaConversions;
+
+import java.util.LinkedList;
 
 public class Pi {
 
@@ -73,7 +75,7 @@ public class Pi {
     public void onReceive(Object message) {
       if (message instanceof Work) {
         Work work = (Work) message;
-        getContext().replyUnsafe(new Result(calculatePiFor(work.getArg(), work.getNrOfElements()))); // perform the work
+        getContext().reply(new Result(calculatePiFor(work.getArg(), work.getNrOfElements()))); // perform the work
       } else throw new IllegalArgumentException("Unknown message [" + message + "]");
     }
   }
@@ -90,34 +92,17 @@ public class Pi {
 
     private ActorRef router;
 
-    static class PiRouter extends UntypedLoadBalancer {
-      private final InfiniteIterator<ActorRef> workers;
-
-      public PiRouter(ActorRef[] workers) {
-        this.workers = new CyclicIterator<ActorRef>(asList(workers));
-      }
-
-      public InfiniteIterator<ActorRef> seq() {
-        return workers;
-      }
-    }
-
     public Master(int nrOfWorkers, int nrOfMessages, int nrOfElements) {
       this.nrOfMessages = nrOfMessages;
       this.nrOfElements = nrOfElements;
 
-      // create the workers
-      final ActorRef[] workers = new ActorRef[nrOfWorkers];
+      LinkedList<ActorRef> workers = new LinkedList<ActorRef>();
       for (int i = 0; i < nrOfWorkers; i++) {
-        workers[i] = actorOf(Worker.class, "worker").start();
+         ActorRef worker = actorOf(Worker.class, "worker").start();
+         workers.add(worker);
       }
 
-      // wrap them with a load-balancing router
-      router = actorOf(new UntypedActorFactory() {
-        public UntypedActor create() {
-          return new PiRouter(workers);
-        }
-      }, "router").start();
+      router = Routing.actorOfWithRoundRobin("pi", JavaConversions.asIterable(workers));
     }
 
     @Override
@@ -134,7 +119,7 @@ public class Pi {
       public void apply(Object msg) {
         // schedule work
         for (int arg = 0; arg < nrOfMessages; arg++) {
-          router.sendOneWay(new Work(arg, nrOfElements), getContext());
+          router.tell(new Work(arg, nrOfElements), getContext());
         }
         // Assume the gathering behavior
         become(gather(getContext().getChannel()));
@@ -150,7 +135,7 @@ public class Pi {
           nrOfResults += 1;
           if (nrOfResults == nrOfMessages) {
             // send the pi result back to the guy who started the calculation
-            recipient.sendOneWay(pi);
+            recipient.tell(pi);
             // shut ourselves down, we're done
             getContext().stop();
           }
@@ -161,9 +146,9 @@ public class Pi {
     @Override
     public void postStop() {
       // send a PoisonPill to all workers telling them to shut down themselves
-      router.sendOneWay(new Broadcast(poisonPill()));
+      router.tell(new Broadcast(poisonPill()));
       // send a PoisonPill to the router, telling him to shut himself down
-      router.sendOneWay(poisonPill());
+      router.tell(poisonPill());
     }
   }
 

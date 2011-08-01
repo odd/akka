@@ -1,7 +1,7 @@
 package akka.actor
 
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 import org.scalatest.matchers.MustMatchers
@@ -12,33 +12,69 @@ import akka.actor.TypedActor._
 import akka.japi.{ Option ⇒ JOption }
 import akka.util.Duration
 import akka.dispatch.{ Dispatchers, Future, KeptPromise }
-import akka.routing.CyclicIterator
-import java.io.{ ObjectInputStream, ObjectOutputStream, ByteArrayOutputStream }
-import akka.actor.TypedActorSpec.Foo
+import java.util.concurrent.atomic.AtomicReference
+import annotation.tailrec
+import akka.testkit.{ EventFilter, filterEvents }
 
 object TypedActorSpec {
+
+  class CyclicIterator[T](val items: Seq[T]) extends Iterator[T] {
+
+    private[this] val current: AtomicReference[Seq[T]] = new AtomicReference(items)
+
+    def hasNext = items != Nil
+
+    def next: T = {
+      @tailrec
+      def findNext: T = {
+        val currentItems = current.get
+        val newItems = currentItems match {
+          case Nil ⇒ items
+          case xs  ⇒ xs
+        }
+
+        if (current.compareAndSet(currentItems, newItems.tail)) newItems.head
+        else findNext
+      }
+
+      findNext
+    }
+
+    override def exists(f: T ⇒ Boolean): Boolean = items exists f
+  }
+
   trait Foo {
     def pigdog(): String
 
     def self = TypedActor.self[Foo]
 
     def futurePigdog(): Future[String]
+
     def futurePigdog(delay: Long): Future[String]
+
     def futurePigdog(delay: Long, numbered: Int): Future[String]
+
     def futureComposePigdogFrom(foo: Foo): Future[String]
 
     def failingFuturePigdog(): Future[String] = throw new IllegalStateException("expected")
+
     def failingOptionPigdog(): Option[String] = throw new IllegalStateException("expected")
+
     def failingJOptionPigdog(): JOption[String] = throw new IllegalStateException("expected")
 
     def failingPigdog(): Unit = throw new IllegalStateException("expected")
 
     def optionPigdog(): Option[String]
+
     def optionPigdog(delay: Long): Option[String]
+
     def joptionPigdog(delay: Long): JOption[String]
 
     def incr()
+
     def read(): Int
+
+    def testMethodCallSerialization(foo: Foo, s: String, i: Int): Unit = throw new IllegalStateException("expected")
   }
 
   class Bar extends Foo with Serializable {
@@ -46,6 +82,7 @@ object TypedActorSpec {
     def pigdog = "Pigdog"
 
     def futurePigdog(): Future[String] = new KeptPromise(Right(pigdog))
+
     def futurePigdog(delay: Long): Future[String] = {
       Thread.sleep(delay)
       futurePigdog
@@ -90,6 +127,7 @@ object TypedActorSpec {
 
   trait Stacked extends Stackable1 with Stackable2 {
     def stacked: String = stackable1 + stackable2
+
     def notOverriddenStacked: String = stackable1 + stackable2
   }
 
@@ -135,9 +173,11 @@ class TypedActorSpec extends WordSpec with MustMatchers with BeforeAndAfterEach 
     }
 
     "throw an IllegalStateExcpetion when TypedActor.self is called in the wrong scope" in {
-      (intercept[IllegalStateException] {
-        TypedActor.self[Foo]
-      }).getMessage must equal("Calling TypedActor.self outside of a TypedActor implementation method!")
+      filterEvents(EventFilter[IllegalStateException]("Calling")) {
+        (intercept[IllegalStateException] {
+          TypedActor.self[Foo]
+        }).getMessage must equal("Calling TypedActor.self outside of a TypedActor implementation method!")
+      }
     }
 
     "have access to itself when executing a method call" in {
@@ -222,27 +262,29 @@ class TypedActorSpec extends WordSpec with MustMatchers with BeforeAndAfterEach 
     }
 
     "be able to handle exceptions when calling methods" in {
-      val t = newFooBar
+      filterEvents(EventFilter[IllegalStateException]("expected")) {
+        val t = newFooBar
 
-      t.incr()
-      t.failingPigdog()
-      t.read() must be(1) //Make sure state is not reset after failure
+        t.incr()
+        t.failingPigdog()
+        t.read() must be(1) //Make sure state is not reset after failure
 
-      t.failingFuturePigdog.await.exception.get.getMessage must be("expected")
-      t.read() must be(1) //Make sure state is not reset after failure
+        t.failingFuturePigdog.await.exception.get.getMessage must be("expected")
+        t.read() must be(1) //Make sure state is not reset after failure
 
-      (intercept[IllegalStateException] {
-        t.failingJOptionPigdog
-      }).getMessage must be("expected")
-      t.read() must be(1) //Make sure state is not reset after failure
+        (intercept[IllegalStateException] {
+          t.failingJOptionPigdog
+        }).getMessage must be("expected")
+        t.read() must be(1) //Make sure state is not reset after failure
 
-      (intercept[IllegalStateException] {
-        t.failingOptionPigdog
-      }).getMessage must be("expected")
+        (intercept[IllegalStateException] {
+          t.failingOptionPigdog
+        }).getMessage must be("expected")
 
-      t.read() must be(1) //Make sure state is not reset after failure
+        t.read() must be(1) //Make sure state is not reset after failure
 
-      mustStop(t)
+        mustStop(t)
+      }
     }
 
     "be able to support stacked traits for the interface part" in {
@@ -307,7 +349,7 @@ class TypedActorSpec extends WordSpec with MustMatchers with BeforeAndAfterEach 
     "be able to serialize and deserialize invocations' parameters" in {
       import java.io._
       val someFoo: Foo = new Bar
-      val m = MethodCall(classOf[Foo].getDeclaredMethod("futureComposePigdogFrom", Array[Class[_]](classOf[Foo]): _*), Array[AnyRef](someFoo))
+      val m = MethodCall(classOf[Foo].getDeclaredMethod("testMethodCallSerialization", Array[Class[_]](classOf[Foo], classOf[String], classOf[Int]): _*), Array[AnyRef](someFoo, null, 1.asInstanceOf[AnyRef]))
       val baos = new ByteArrayOutputStream(8192 * 4)
       val out = new ObjectOutputStream(baos)
 
@@ -319,9 +361,12 @@ class TypedActorSpec extends WordSpec with MustMatchers with BeforeAndAfterEach 
       val mNew = in.readObject().asInstanceOf[MethodCall]
 
       mNew.method must be(m.method)
-      mNew.parameters must have size 1
+      mNew.parameters must have size 3
       mNew.parameters(0) must not be null
       mNew.parameters(0).getClass must be === classOf[Bar]
+      mNew.parameters(1) must be(null)
+      mNew.parameters(2) must not be null
+      mNew.parameters(2).asInstanceOf[Int] must be === 1
     }
   }
 }

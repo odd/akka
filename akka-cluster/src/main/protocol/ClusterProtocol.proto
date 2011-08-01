@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2011 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
  */
 
 option java_package = "akka.cluster";
@@ -19,6 +19,7 @@ message RemoteDaemonMessageProtocol {
   optional UuidProtocol actorUuid = 2;
   optional string actorAddress = 3;
   optional bytes payload = 5;
+  optional UuidProtocol replicateActorFromUuid = 6;
 }
 
 /**

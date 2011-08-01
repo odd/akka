@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2010 Scalable Solutions AB <http://scalablesolutions.se>
+ * Copyright (C) 2009-2010 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.camel.component
@@ -15,9 +15,8 @@ import org.apache.camel.impl.{ DefaultProducer, DefaultEndpoint, DefaultComponen
 import akka.actor._
 import akka.camel.{ Ack, Failure, Message }
 import akka.camel.CamelMessageConversion.toExchangeAdapter
-import akka.dispatch.{ Promise, MessageInvocation, MessageDispatcher }
-
 import scala.reflect.BeanProperty
+import akka.dispatch.{ FutureTimeoutException, Promise, MessageInvocation, MessageDispatcher }
 
 /**
  * @author Martin Krasser
@@ -172,10 +171,8 @@ class ActorProducer(val ep: ActorEndpoint) extends DefaultProducer(ep) with Asyn
   }
 
   private def sendSync(exchange: Exchange) = {
-    import akka.camel.Consumer._
-
     val actor = target(exchange)
-    val result: Any = try { actor !! requestFor(exchange) } catch { case e ⇒ Some(Failure(e)) }
+    val result: Any = try { (actor ? requestFor(exchange)).as[Any] } catch { case e ⇒ Some(Failure(e)) }
 
     result match {
       case Some(Ack)          ⇒ { /* no response message to set */ }
@@ -312,7 +309,7 @@ private[akka] class AsyncCallbackAdapter(exchange: Exchange, callback: AsyncCall
   def shutdownLinkedActors: Unit = unsupported
   def supervisor: Option[ActorRef] = unsupported
   def homeAddress: Option[InetSocketAddress] = None
-  protected[akka] def postMessageToMailboxAndCreateFutureResultWithTimeout(message: Any, timeout: Long, channel: UntypedChannel) = unsupported
+  protected[akka] def postMessageToMailboxAndCreateFutureResultWithTimeout(message: Any, timeout: Timeout, channel: UntypedChannel) = unsupported
   protected[akka] def mailbox: AnyRef = unsupported
   protected[akka] def mailbox_=(msg: AnyRef): AnyRef = unsupported
   protected[akka] def restart(reason: Throwable, maxNrOfRetries: Option[Int], withinTimeRange: Option[Int]): Unit = unsupported
