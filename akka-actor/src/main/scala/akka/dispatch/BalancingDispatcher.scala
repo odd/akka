@@ -1,12 +1,18 @@
 /**
- *    Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
+ *    Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.dispatch
 
-import akka.actor.{ ActorRef, Actor, IllegalActorStateException }
-
-import util.DynamicVariable
+import akka.actor.{ ActorCell, ActorRef }
+import akka.dispatch.sysmsg._
+import scala.annotation.tailrec
+import scala.concurrent.duration.Duration
+import akka.util.Helpers
+import java.util.{ Comparator, Iterator }
+import java.util.concurrent.{ Executor, LinkedBlockingQueue, ConcurrentLinkedQueue, ConcurrentSkipListSet }
+import akka.actor.ActorSystemImpl
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * An executor based event driven dispatcher which will try to redistribute work from busy actors to idle actors. It is assumed
@@ -16,143 +22,83 @@ import util.DynamicVariable
  * Although the technique used in this implementation is commonly known as "work stealing", the actual implementation is probably
  * best described as "work donating" because the actor of which work is being stolen takes the initiative.
  * <p/>
- * The preferred way of creating dispatchers is to use
- * the {@link akka.dispatch.Dispatchers} factory object.
+ * The preferred way of creating dispatchers is to define configuration of it and use the
+ * the `lookup` method in [[akka.dispatch.Dispatchers]].
  *
  * @see akka.dispatch.BalancingDispatcher
  * @see akka.dispatch.Dispatchers
- *
- * @author Viktor Klang
  */
 class BalancingDispatcher(
-  _name: String,
-  throughput: Int = Dispatchers.THROUGHPUT,
-  throughputDeadlineTime: Int = Dispatchers.THROUGHPUT_DEADLINE_TIME_MILLIS,
-  mailboxType: MailboxType = Dispatchers.MAILBOX_TYPE,
-  config: ThreadPoolConfig = ThreadPoolConfig())
-  extends Dispatcher(_name, throughput, throughputDeadlineTime, mailboxType, config) {
-
-  def this(_name: String, throughput: Int, throughputDeadlineTime: Int, mailboxType: MailboxType) =
-    this(_name, throughput, throughputDeadlineTime, mailboxType, ThreadPoolConfig()) // Needed for Java API usage
-
-  def this(_name: String, throughput: Int, mailboxType: MailboxType) =
-    this(_name, throughput, Dispatchers.THROUGHPUT_DEADLINE_TIME_MILLIS, mailboxType) // Needed for Java API usage
-
-  def this(_name: String, throughput: Int) =
-    this(_name, throughput, Dispatchers.THROUGHPUT_DEADLINE_TIME_MILLIS, Dispatchers.MAILBOX_TYPE) // Needed for Java API usage
-
-  def this(_name: String, _config: ThreadPoolConfig) =
-    this(_name, Dispatchers.THROUGHPUT, Dispatchers.THROUGHPUT_DEADLINE_TIME_MILLIS, Dispatchers.MAILBOX_TYPE, _config)
-
-  def this(_name: String, memberType: Class[_ <: Actor]) =
-    this(_name, Dispatchers.THROUGHPUT, Dispatchers.THROUGHPUT_DEADLINE_TIME_MILLIS, Dispatchers.MAILBOX_TYPE) // Needed for Java API usage
-
-  def this(_name: String, mailboxType: MailboxType) =
-    this(_name, Dispatchers.THROUGHPUT, Dispatchers.THROUGHPUT_DEADLINE_TIME_MILLIS, mailboxType) // Needed for Java API usage
-
-  @volatile
-  private var actorType: Option[Class[_]] = None
-  @volatile
-  private var members = Vector[ActorRef]()
-  private val donationInProgress = new DynamicVariable(false)
-
-  private[akka] override def register(actorRef: ActorRef) = {
-    //Verify actor type conformity
-    actorType match {
-      case None ⇒ actorType = Some(actorRef.actor.getClass)
-      case Some(aType) ⇒
-        if (aType != actorRef.actor.getClass)
-          throw new IllegalActorStateException(String.format(
-            "Can't register actor %s in a work stealing dispatcher which already knows actors of type %s",
-            actorRef, aType))
-    }
-
-    synchronized { members :+= actorRef } //Update members
-    super.register(actorRef)
-  }
-
-  private[akka] override def unregister(actorRef: ActorRef) = {
-    synchronized { members = members.filterNot(actorRef eq) } //Update members
-    super.unregister(actorRef)
-  }
-
-  override private[akka] def dispatch(invocation: MessageInvocation) = {
-    val mbox = getMailbox(invocation.receiver)
-    if (donationInProgress.value == false && (!mbox.isEmpty || mbox.dispatcherLock.locked) && attemptDonationOf(invocation, mbox)) {
-      //We were busy and we got to donate the message to some other lucky guy, we're done here
-    } else {
-      mbox enqueue invocation
-      registerForExecution(mbox)
-    }
-  }
-
-  override private[akka] def reRegisterForExecution(mbox: MessageQueue with ExecutableMailbox): Unit = {
-    try {
-      donationInProgress.value = true
-      while (donateFrom(mbox)) {} //When we reregister, first donate messages to another actor
-    } finally { donationInProgress.value = false }
-
-    if (!mbox.isEmpty) //If we still have messages left to process, reschedule for execution
-      super.reRegisterForExecution(mbox)
-  }
+  _configurator: MessageDispatcherConfigurator,
+  _id: String,
+  throughput: Int,
+  throughputDeadlineTime: Duration,
+  _mailboxType: MailboxType,
+  _executorServiceFactoryProvider: ExecutorServiceFactoryProvider,
+  _shutdownTimeout: FiniteDuration,
+  attemptTeamWork: Boolean)
+  extends Dispatcher(_configurator, _id, throughput, throughputDeadlineTime, _executorServiceFactoryProvider, _shutdownTimeout) {
 
   /**
-   * Returns true if it successfully donated a message
+   * INTERNAL API
    */
-  protected def donateFrom(donorMbox: MessageQueue with ExecutableMailbox): Boolean = {
-    val actors = members // copy to prevent concurrent modifications having any impact
-
-    // we risk to pick a thief which is unregistered from the dispatcher in the meantime, but that typically means
-    // the dispatcher is being shut down...
-    // Starts at is seeded by current time
-    doFindDonorRecipient(donorMbox, actors, (System.currentTimeMillis % actors.size).asInstanceOf[Int]) match {
-      case null      ⇒ false
-      case recipient ⇒ donate(donorMbox.dequeue, recipient)
-    }
-  }
+  private[akka] val team = new ConcurrentSkipListSet[ActorCell](
+    Helpers.identityHashComparator(new Comparator[ActorCell] {
+      def compare(l: ActorCell, r: ActorCell) = l.self.path compareTo r.self.path
+    }))
 
   /**
-   * Returns true if the donation succeeded or false otherwise
+   * INTERNAL API
    */
-  protected def attemptDonationOf(message: MessageInvocation, donorMbox: MessageQueue with ExecutableMailbox): Boolean = try {
-    donationInProgress.value = true
-    val actors = members // copy to prevent concurrent modifications having any impact
-    doFindDonorRecipient(donorMbox, actors, System.identityHashCode(message) % actors.size) match {
-      case null      ⇒ false
-      case recipient ⇒ donate(message, recipient)
-    }
-  } finally { donationInProgress.value = false }
+  private[akka] val messageQueue: MessageQueue = _mailboxType.create(None, None)
 
-  /**
-   * Rewrites the message and adds that message to the recipients mailbox
-   * returns true if the message is non-null
-   */
-  protected def donate(organ: MessageInvocation, recipient: ActorRef): Boolean = {
-    if (organ ne null) {
-      recipient.postMessageToMailbox(organ.message, organ.channel)
-      true
-    } else false
-  }
-
-  /**
-   * Returns an available recipient for the message, if any
-   */
-  protected def doFindDonorRecipient(donorMbox: MessageQueue with ExecutableMailbox, potentialRecipients: Vector[ActorRef], startIndex: Int): ActorRef = {
-    val prSz = potentialRecipients.size
-    var i = 0
-    var recipient: ActorRef = null
-
-    while ((i < prSz) && (recipient eq null)) {
-      val actor = potentialRecipients((i + startIndex) % prSz) //Wrap-around, one full lap
-      val mbox = getMailbox(actor)
-
-      if ((mbox ne donorMbox) && mbox.isEmpty) { //Don't donate to yourself
-        recipient = actor //Found!
+  private class SharingMailbox(val system: ActorSystemImpl, _messageQueue: MessageQueue)
+    extends Mailbox(_messageQueue) with DefaultSystemMessageQueue {
+    override def cleanUp(): Unit = {
+      val dlq = mailboxes.deadLetterMailbox
+      //Don't call the original implementation of this since it scraps all messages, and we don't want to do that
+      var messages = systemDrain(new LatestFirstSystemMessageList(NoMessage))
+      while (messages.nonEmpty) {
+        // message must be “virgin” before being able to systemEnqueue again
+        val message = messages.head
+        messages = messages.tail
+        message.unlink()
+        dlq.systemEnqueue(system.deadLetters, message)
       }
-
-      i += 1
     }
-
-    recipient // nothing found, reuse same start index next time
   }
+
+  protected[akka] override def createMailbox(actor: akka.actor.Cell, mailboxType: MailboxType): Mailbox =
+    new SharingMailbox(actor.systemImpl, messageQueue)
+
+  protected[akka] override def register(actor: ActorCell): Unit = {
+    super.register(actor)
+    team.add(actor)
+  }
+
+  protected[akka] override def unregister(actor: ActorCell): Unit = {
+    team.remove(actor)
+    super.unregister(actor)
+    teamWork()
+  }
+
+  override protected[akka] def dispatch(receiver: ActorCell, invocation: Envelope) = {
+    messageQueue.enqueue(receiver.self, invocation)
+    if (!registerForExecution(receiver.mailbox, false, false)) teamWork()
+  }
+
+  protected def teamWork(): Unit =
+    if (attemptTeamWork) {
+      @tailrec def scheduleOne(i: Iterator[ActorCell] = team.iterator): Unit =
+        if (messageQueue.hasMessages
+          && i.hasNext
+          && (executorService.executor match {
+            case lm: LoadMetrics ⇒ lm.atFullThrottle == false
+            case other           ⇒ true
+          })
+          && !registerForExecution(i.next.mailbox, false, false))
+          scheduleOne(i)
+
+      scheduleOne()
+    }
 }

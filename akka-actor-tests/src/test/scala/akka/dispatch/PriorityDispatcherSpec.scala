@@ -1,50 +1,80 @@
 package akka.dispatch
 
-import akka.actor.Actor._
-import akka.actor.Actor
-import org.scalatest.WordSpec
-import org.scalatest.matchers.MustMatchers
-import java.util.concurrent.CountDownLatch
+import language.postfixOps
 
-class PriorityDispatcherSpec extends WordSpec with MustMatchers {
+import org.junit.runner.RunWith
+import org.scalatest.junit.JUnitRunner
+import com.typesafe.config.Config
+
+import akka.actor.{ Props, ActorSystem, Actor }
+import akka.pattern.ask
+import akka.testkit.{ DefaultTimeout, AkkaSpec }
+import scala.concurrent.duration._
+
+object PriorityDispatcherSpec {
+  val config = """
+    unbounded-prio-dispatcher {
+      mailbox-type = "akka.dispatch.PriorityDispatcherSpec$Unbounded"
+    }
+    bounded-prio-dispatcher {
+      mailbox-type = "akka.dispatch.PriorityDispatcherSpec$Bounded"
+    }
+    """
+
+  class Unbounded(settings: ActorSystem.Settings, config: Config) extends UnboundedPriorityMailbox(PriorityGenerator({
+    case i: Int  ⇒ i //Reverse order
+    case 'Result ⇒ Int.MaxValue
+  }: Any ⇒ Int))
+
+  class Bounded(settings: ActorSystem.Settings, config: Config) extends BoundedPriorityMailbox(PriorityGenerator({
+    case i: Int  ⇒ i //Reverse order
+    case 'Result ⇒ Int.MaxValue
+  }: Any ⇒ Int), 1000, 10 seconds)
+
+}
+
+@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
+class PriorityDispatcherSpec extends AkkaSpec(PriorityDispatcherSpec.config) with DefaultTimeout {
 
   "A PriorityDispatcher" must {
     "Order it's messages according to the specified comparator using an unbounded mailbox" in {
-      testOrdering(UnboundedMailbox())
+      val dispatcherKey = "unbounded-prio-dispatcher"
+      testOrdering(dispatcherKey)
     }
 
     "Order it's messages according to the specified comparator using a bounded mailbox" in {
-      testOrdering(BoundedMailbox(1000))
+      val dispatcherKey = "bounded-prio-dispatcher"
+      testOrdering(dispatcherKey)
     }
   }
 
-  def testOrdering(mboxType: MailboxType) {
-    val dispatcher = new PriorityDispatcher("Test",
-      PriorityGenerator({
-        case i: Int  ⇒ i //Reverse order
-        case 'Result ⇒ Int.MaxValue
-      }: Any ⇒ Int),
-      throughput = 1,
-      mailboxType = mboxType)
+  def testOrdering(dispatcherKey: String) {
+    val msgs = (1 to 100) toList
 
-    val actor = actorOf(new Actor {
-      self.dispatcher = dispatcher
-      var acc: List[Int] = Nil
+    // It's important that the actor under test is not a top level actor
+    // with RepointableActorRef, since messages might be queued in
+    // UnstartedCell and the sent to the PriorityQueue and consumed immediately
+    // without the ordering taking place.
+    val actor = system.actorOf(Props(new Actor {
+      context.actorOf(Props(new Actor {
 
-      def receive = {
-        case i: Int  ⇒ acc = i :: acc
-        case 'Result ⇒ self tryReply acc
-      }
-    }).start()
+        val acc = scala.collection.mutable.ListBuffer[Int]()
 
-    dispatcher.suspend(actor) //Make sure the actor isn't treating any messages, let it buffer the incoming messages
+        scala.util.Random.shuffle(msgs) foreach { m ⇒ self ! m }
 
-    val msgs = (1 to 100).toList
-    for (m ← msgs) actor ! m
+        self.tell('Result, testActor)
 
-    dispatcher.resume(actor) //Signal the actor to start treating it's message backlog
+        def receive = {
+          case i: Int  ⇒ acc += i
+          case 'Result ⇒ sender ! acc.toList
+        }
+      }).withDispatcher(dispatcherKey))
 
-    actor.?('Result).as[List[Int]].get must be === (msgs.reverse)
+      def receive = Actor.emptyBehavior
+
+    }))
+
+    expectMsgType[List[_]] should equal(msgs)
   }
 
 }

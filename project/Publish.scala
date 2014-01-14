@@ -1,15 +1,26 @@
+package akka
+
 import sbt._
-import Keys._
+import sbt.Keys._
+import sbt.Project.Initialize
 import java.io.File
 
 object Publish {
   final val Snapshot = "-SNAPSHOT"
 
+  val defaultPublishTo = SettingKey[File]("default-publish-to")
+
   lazy val settings = Seq(
-    crossPaths  := false,
-    pomExtra    := akkaPomExtra,
-    publishTo   := akkaPublishTo,
-    credentials ++= akkaCredentials
+    crossPaths := false,
+    pomExtra := akkaPomExtra,
+    publishTo <<= akkaPublishTo,
+    credentials ++= akkaCredentials,
+    organizationName := "Typesafe Inc.",
+    organizationHomepage := Some(url("http://www.typesafe.com")),
+    publishMavenStyle := true,
+    // Maven central cannot allow other repos.  
+    // TODO - Make sure all artifacts are on central.
+    pomIncludeRepository := { x => false }
   )
 
   lazy val versionSettings = Seq(
@@ -17,44 +28,83 @@ object Publish {
   )
 
   def akkaPomExtra = {
-    <inceptionYear>2009</inceptionYear>
-    <url>http://akka.io</url>
-    <organization>
-      <name>Typesafe Inc.</name>
-      <url>http://www.typesafe.com</url>
-    </organization>
-    <licenses>
-      <license>
-        <name>Apache 2</name>
-        <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
-        <distribution>repo</distribution>
-      </license>
-    </licenses>
+    (<inceptionYear>2009</inceptionYear>
+    <scm>
+      <url>git://github.com/akka/akka.git</url>
+      <connection>scm:git:git@github.com:akka/akka.git</connection>
+    </scm>) ++ makeDevelopersXml(Map(
+        "jboner" -> "Jonas Boner",
+        "viktorklang" -> "Viktor Klang",
+        "rkuhn" -> "Roland Kuhn",
+        "pvlugter" -> "Peter Vlugter"
+        // TODO - More than the names in the last 10 commits
+      ))
   }
 
-  def akkaPublishTo: Option[Resolver] = {
-    val property = Option(System.getProperty("akka.publish.repository"))
-    val repo = property map { "Akka Publish Repository" at _ }
-    val m2repo = Path.userHome / ".m2" /"repository"
-    repo orElse Some(Resolver.file("Local Maven Repository", m2repo))
+
+  private[this] def makeDevelopersXml(users: Map[String,String]) =
+    <developers>
+      { 
+        for((id, user) <- users)
+        yield <developer><id>{id}</id><name>{user}</name></developer>
+      }
+    </developers>
+
+  def sonatypePublishTo: Initialize[Option[Resolver]] = {
+    version { v: String =>
+      val nexus = "https://oss.sonatype.org/"
+      if (v.trim.endsWith("SNAPSHOT")) Some("snapshots" at nexus + "content/repositories/snapshots")
+      else                             Some("releases" at nexus + "service/local/staging/deploy/maven2")
+    }
   }
 
-  def akkaCredentials: Seq[Credentials] = {
-    val property = Option(System.getProperty("akka.publish.credentials"))
-    property map (f => Credentials(new File(f))) toSeq
+  def akkaPublishTo: Initialize[Option[Resolver]] = {
+    (defaultPublishTo, version) { (defaultPT, v) =>
+      akkaPublishRepository orElse
+      sonatypeRepo(v) orElse
+      Some(Resolver.file("Default Local Repository", defaultPT))
+    }
   }
+
+  def akkaPluginPublishTo: Initialize[Option[Resolver]] = {
+    (defaultPublishTo, version) { (defaultPT, version) =>
+      pluginPublishLocally(defaultPT) orElse
+      akkaPublishRepository orElse
+      pluginRepo(version) orElse
+      Some(Resolver.file("Default Local Repository", defaultPT))
+    }
+  }
+
+  def sonatypeRepo(version: String): Option[Resolver] = {
+    Option(sys.props("publish.maven.central")) filter (_.toLowerCase == "true") map { _ =>
+      val nexus = "https://oss.sonatype.org/"
+      if(version endsWith "-SNAPSHOT") ("snapshots" at nexus + "content/repositories/snapshots")
+      else ("releases"  at nexus + "service/local/staging/deploy/maven2")
+    }
+  }
+
+  def pluginRepo(version: String): Option[Resolver] =
+    Option(sys.props("publish.maven.central")) collect { case mc if mc.toLowerCase == "true" =>
+      val name = if (version endsWith "-SNAPSHOT") "sbt-plugin-snapshots" else "sbt-plugin-releases"
+      Resolver.url(name, url("http://scalasbt.artifactoryonline.com/scalasbt/" + name))(Resolver.ivyStylePatterns)
+    }
+
+  def akkaPublishRepository: Option[Resolver] =
+      Option(System.getProperty("akka.publish.repository", null)) map { "Akka Publish Repository" at _ }
+
+  def akkaCredentials: Seq[Credentials] =
+    Option(System.getProperty("akka.publish.credentials", null)) map (f => Credentials(new File(f))) toSeq
+
+  def pluginPublishLocally(defaultPT: File): Option[Resolver] =
+    Option(sys.props("publish.plugin.locally")) collect { case pl if pl.toLowerCase == "true" =>
+      Resolver.file("Default Local Repository", defaultPT)
+    }
+
+  // timestamped versions
 
   def stampVersion = Command.command("stamp-version") { state =>
-    append((version in ThisBuild ~= stamp) :: Nil, state)
-  }
-
-  // TODO: replace with extracted.append when updated to sbt 0.10.1
-  def append(settings: Seq[Setting[_]], state: State): State = {
     val extracted = Project.extract(state)
-    import extracted._
-    val append = Load.transformSettings(Load.projectScope(currentRef), currentRef.build, rootProject, settings)
-    val newStructure = Load.reapply(session.original ++ append, structure)
-    Project.setProject(session, newStructure, state)
+    extracted.append(List(version in ThisBuild ~= stamp), state)
   }
 
   def stamp(version: String): String = {

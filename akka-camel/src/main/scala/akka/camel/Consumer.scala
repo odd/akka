@@ -1,150 +1,94 @@
 /**
- * Copyright (C) 2009-2010 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.camel
 
+import akka.camel.internal.CamelSupervisor.Register
 import org.apache.camel.model.{ RouteDefinition, ProcessorDefinition }
-
 import akka.actor._
+import scala.concurrent.duration._
+import akka.dispatch.Mapper
 
 /**
  * Mixed in by Actor implementations that consume message from Camel endpoints.
  *
- * @author Martin Krasser
+ *
  */
-trait Consumer { this: Actor ⇒
-  import RouteDefinitionHandler._
-
+trait Consumer extends Actor with CamelSupport {
+  import Consumer._
   /**
-   * The default route definition handler is the identity function
-   */
-  private[camel] var routeDefinitionHandler: RouteDefinitionHandler = identity
-
-  /**
-   * Returns the Camel endpoint URI to consume messages from.
+   * Must return the Camel endpoint URI that the consumer wants to consume messages from.
    */
   def endpointUri: String
 
   /**
-   * Determines whether two-way communications between an endpoint and this consumer actor
-   * should be done in blocking or non-blocking mode (default is non-blocking). This method
-   * doesn't have any effect on one-way communications (they'll never block).
+   * Registers the consumer endpoint. Note: when overriding this method, be sure to
+   * call 'super.preRestart', otherwise the consumer endpoint will not be registered.
    */
-  def blocking = false
-
-  /**
-   * Determines whether one-way communications between an endpoint and this consumer actor
-   * should be auto-acknowledged or application-acknowledged.
-   */
-  def autoack = true
-
-  /**
-   * Sets the route definition handler for creating a custom route to this consumer instance.
-   */
-  def onRouteDefinition(h: RouteDefinition ⇒ ProcessorDefinition[_]): Unit = onRouteDefinition(from(h))
-
-  /**
-   * Sets the route definition handler for creating a custom route to this consumer instance.
-   * <p>
-   * Java API.
-   */
-  def onRouteDefinition(h: RouteDefinitionHandler): Unit = routeDefinitionHandler = h
-}
-
-/**
- *  Java-friendly Consumer.
- *
- * @see UntypedConsumerActor
- * @see RemoteUntypedConsumerActor
- *
- * @author Martin Krasser
- */
-trait UntypedConsumer extends Consumer { self: UntypedActor ⇒
-  final override def endpointUri = getEndpointUri
-  final override def blocking = isBlocking
-  final override def autoack = isAutoack
-
-  /**
-   * Returns the Camel endpoint URI to consume messages from.
-   */
-  def getEndpointUri(): String
-
-  /**
-   * Determines whether two-way communications between an endpoint and this consumer actor
-   * should be done in blocking or non-blocking mode (default is non-blocking). This method
-   * doesn't have any effect on one-way communications (they'll never block).
-   */
-  def isBlocking() = super.blocking
-
-  /**
-   * Determines whether one-way communications between an endpoint and this consumer actor
-   * should be auto-acknowledged or application-acknowledged.
-   */
-  def isAutoack() = super.autoack
-}
-
-/**
- * Subclass this abstract class to create an MDB-style untyped consumer actor. This
- * class is meant to be used from Java.
- */
-abstract class UntypedConsumerActor extends UntypedActor with UntypedConsumer
-
-/**
- * A callback handler for route definitions to consumer actors.
- *
- * @author Martin Krasser
- */
-trait RouteDefinitionHandler {
-  def onRouteDefinition(rd: RouteDefinition): ProcessorDefinition[_]
-}
-
-/**
- * The identity route definition handler.
- *
- * @author Martin Krasser
- *
- */
-class RouteDefinitionIdentity extends RouteDefinitionHandler {
-  def onRouteDefinition(rd: RouteDefinition) = rd
-}
-
-/**
- * @author Martin Krasser
- */
-object RouteDefinitionHandler {
-  /**
-   * Returns the identity route definition handler
-   */
-  val identity = new RouteDefinitionIdentity
-
-  /**
-   * Created a route definition handler from the given function.
-   */
-  def from(f: RouteDefinition ⇒ ProcessorDefinition[_]) = new RouteDefinitionHandler {
-    def onRouteDefinition(rd: RouteDefinition) = f(rd)
+  override def preStart() {
+    super.preStart()
+    // Possible FIXME. registering the endpoint here because of problems
+    // with order of execution of trait body in the Java version (UntypedConsumerActor)
+    // where getEndpointUri is called before its constructor (where a uri is set to return from getEndpointUri)
+    // and remains null. CustomRouteTest provides a test to verify this.
+    register()
   }
+
+  private[this] def register() {
+    camel.supervisor ! Register(self, endpointUri, Some(ConsumerConfig(activationTimeout, replyTimeout, autoAck, onRouteDefinition)))
+  }
+
+  /**
+   * How long the actor should wait for activation before it fails.
+   */
+  def activationTimeout: FiniteDuration = camel.settings.ActivationTimeout
+
+  /**
+   * When endpoint is out-capable (can produce responses) replyTimeout is the maximum time
+   * the endpoint can take to send the response before the message exchange fails. It defaults to 1 minute.
+   * This setting is used for out-capable, in-only, manually acknowledged communication.
+   */
+  def replyTimeout: FiniteDuration = camel.settings.ReplyTimeout
+
+  /**
+   * Determines whether one-way communications between an endpoint and this consumer actor
+   * should be auto-acknowledged or application-acknowledged.
+   * This flag has only effect when exchange is in-only.
+   */
+  def autoAck: Boolean = camel.settings.AutoAck
+
+  /**
+   * Returns the route definition handler for creating a custom route to this consumer.
+   * By default it returns an identity function, override this method to
+   * return a custom route definition handler. The returned function is not allowed to close over 'this', meaning it is
+   * not allowed to refer to the actor instance itself, since that can easily cause concurrent shared state issues.
+   */
+  def onRouteDefinition: RouteDefinition ⇒ ProcessorDefinition[_] = {
+    val mapper = getRouteDefinitionHandler
+    if (mapper != identityRouteMapper) mapper.apply _
+    else identityRouteMapper
+  }
+
+  /**
+   * Java API: Returns the [[akka.dispatch.Mapper]] function that will be used as a route definition handler
+   * for creating custom route to this consumer. By default it returns an identity function, override this method to
+   * return a custom route definition handler. The [[akka.dispatch.Mapper]] is not allowed to close over 'this', meaning it is
+   * not allowed to refer to the actor instance itself, since that can easily cause concurrent shared state issues.
+   */
+  def getRouteDefinitionHandler: Mapper[RouteDefinition, ProcessorDefinition[_]] = identityRouteMapper
 }
 
 /**
- * @author Martin Krasser
+ * Internal use only.
  */
 private[camel] object Consumer {
-  /**
-   * Applies a function <code>f</code> to <code>actorRef</code> if <code>actorRef</code>
-   * references a consumer actor. A valid reference to a consumer actor is a local actor
-   * reference with a target actor that implements the <code>Consumer</code> trait. The
-   * target <code>Consumer</code> instance is passed as argument to <code>f</code>. This
-   * method returns <code>None</code> if <code>actorRef</code> is not a valid reference
-   * to a consumer actor, <code>Some</code> contained the return value of <code>f</code>
-   * otherwise.
-   */
-  def withConsumer[T](actorRef: ActorRef)(f: Consumer ⇒ T): Option[T] = {
-    if (!actorRef.actor.isInstanceOf[Consumer]) None
-
-    // TODO: check if this is needed at all
-    //else if (actorRef.homeAddress.isDefined) None
-
-    else Some(f(actorRef.actor.asInstanceOf[Consumer]))
+  val identityRouteMapper = new Mapper[RouteDefinition, ProcessorDefinition[_]]() {
+    override def checkedApply(rd: RouteDefinition): ProcessorDefinition[_] = rd
   }
 }
+/**
+ * INTERNAL API
+ * Captures the configuration of the Consumer.
+ */
+private[camel] case class ConsumerConfig(activationTimeout: FiniteDuration, replyTimeout: FiniteDuration, autoAck: Boolean, onRouteDefinition: RouteDefinition ⇒ ProcessorDefinition[_]) extends NoSerializationVerificationNeeded

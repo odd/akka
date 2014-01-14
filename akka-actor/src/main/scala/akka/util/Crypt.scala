@@ -1,14 +1,11 @@
 /**
- * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.util
 
 import java.security.{ MessageDigest, SecureRandom }
-
-/**
- * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
- */
+//FIXME DOCS
 object Crypt {
   val hex = "0123456789ABCDEF"
   val lineSeparator = System.getProperty("line.separator")
@@ -35,8 +32,8 @@ object Crypt {
   }
 
   def hexify(bytes: Array[Byte]): String = {
-    val builder = new StringBuilder
-    bytes.foreach { byte ⇒ builder.append(hex.charAt((byte & 0xF) >> 4)).append(hex.charAt(byte & 0xF)) }
+    val builder = new java.lang.StringBuilder(bytes.length * 2)
+    bytes.foreach { byte ⇒ builder.append(hex.charAt((byte & 0xF0) >> 4)).append(hex.charAt(byte & 0xF)) }
     builder.toString
   }
 

@@ -1,21 +1,22 @@
 /**
- * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.testkit
 
-import org.scalatest.matchers.MustMatchers
+import language.{ postfixOps, reflectiveCalls }
+import org.scalatest.Matchers
 import org.scalatest.{ BeforeAndAfterEach, WordSpec }
 import akka.actor._
-import akka.config.Supervision.OneForOneStrategy
-import akka.event.EventHandler
-import akka.dispatch.{ Future, Promise }
+import akka.event.Logging.Warning
+import scala.concurrent.{ Future, Promise, Await }
+import scala.concurrent.duration._
+import akka.actor.ActorSystem
+import akka.pattern.ask
+import akka.dispatch.Dispatcher
 
 /**
  * Test whether TestActorRef behaves as an ActorRef should, besides its own spec.
- *
- * @author Roland Kuhn
  */
-
 object TestActorRefSpec {
 
   var counter = 4
@@ -36,31 +37,30 @@ object TestActorRefSpec {
   }
 
   class ReplyActor extends TActor {
-    var replyTo: Channel[Any] = null
+    import context.system
+    var replyTo: ActorRef = null
 
     def receiveT = {
       case "complexRequest" ⇒ {
-        replyTo = self.channel
-        val worker = TestActorRef[WorkerActor].start()
+        replyTo = sender
+        val worker = TestActorRef(Props[WorkerActor])
         worker ! "work"
       }
       case "complexRequest2" ⇒
-        val worker = TestActorRef[WorkerActor].start()
-        worker ! self.channel
+        val worker = TestActorRef(Props[WorkerActor])
+        worker ! sender
       case "workDone"      ⇒ replyTo ! "complexReply"
-      case "simpleRequest" ⇒ self.reply("simpleReply")
+      case "simpleRequest" ⇒ sender ! "simpleReply"
     }
   }
 
   class WorkerActor() extends TActor {
     def receiveT = {
-      case "work" ⇒ {
-        self.reply("workDone")
-        self.stop()
-      }
-      case replyTo: Channel[Any] ⇒ {
-        replyTo ! "complexReply"
-      }
+      case "work" ⇒
+        sender ! "workDone"
+        context stop self
+      case replyTo: Promise[_] ⇒ replyTo.asInstanceOf[Promise[Any]].success("complexReply")
+      case replyTo: ActorRef   ⇒ replyTo ! "complexReply"
     }
   }
 
@@ -80,61 +80,70 @@ object TestActorRefSpec {
   }
 
   class Logger extends Actor {
-    import EventHandler._
     var count = 0
     var msg: String = _
     def receive = {
-      case Warning(_, m: String) ⇒ count += 1; msg = m
+      case Warning(_, _, m: String) ⇒ count += 1; msg = m
     }
   }
 
+  class ReceiveTimeoutActor(target: ActorRef) extends Actor {
+    context setReceiveTimeout 1.second
+    def receive = {
+      case ReceiveTimeout ⇒
+        target ! "timeout"
+        context stop self
+    }
+  }
+
+  /**
+   * Forwarding `Terminated` to non-watching testActor is not possible,
+   * and therefore the `Terminated` message is wrapped.
+   */
+  case class WrappedTerminated(t: Terminated)
+
 }
 
-class TestActorRefSpec extends WordSpec with MustMatchers with BeforeAndAfterEach {
+@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
+class TestActorRefSpec extends AkkaSpec("disp1.type=Dispatcher") with BeforeAndAfterEach with DefaultTimeout {
 
   import TestActorRefSpec._
 
-  EventHandler.start()
+  override def beforeEach(): Unit = otherthread = null
 
-  override def beforeEach {
-    otherthread = null
-  }
+  private def assertThread(): Unit = otherthread should (be(null) or equal(thread))
 
-  private def assertThread {
-    otherthread must (be(null) or equal(thread))
-  }
-
-  "A TestActorRef must be an ActorRef, hence it" must {
+  "A TestActorRef should be an ActorRef, hence it" must {
 
     "support nested Actor creation" when {
 
       "used with TestActorRef" in {
-        val a = TestActorRef(new Actor {
-          val nested = TestActorRef(new Actor { def receive = { case _ ⇒ } }).start()
-          def receive = { case _ ⇒ self reply nested }
-        }).start()
-        a must not be (null)
-        val nested = (a ? "any").as[ActorRef].get
-        nested must not be (null)
-        a must not be theSameInstanceAs(nested)
+        val a = TestActorRef(Props(new Actor {
+          val nested = TestActorRef(Props(new Actor { def receive = { case _ ⇒ } }))
+          def receive = { case _ ⇒ sender ! nested }
+        }))
+        a should not be (null)
+        val nested = Await.result((a ? "any").mapTo[ActorRef], timeout.duration)
+        nested should not be (null)
+        a should not be theSameInstanceAs(nested)
       }
 
       "used with ActorRef" in {
-        val a = TestActorRef(new Actor {
-          val nested = Actor.actorOf(new Actor { def receive = { case _ ⇒ } }).start()
-          def receive = { case _ ⇒ self reply nested }
-        }).start()
-        a must not be (null)
-        val nested = (a ? "any").as[ActorRef].get
-        nested must not be (null)
-        a must not be theSameInstanceAs(nested)
+        val a = TestActorRef(Props(new Actor {
+          val nested = context.actorOf(Props(new Actor { def receive = { case _ ⇒ } }))
+          def receive = { case _ ⇒ sender ! nested }
+        }))
+        a should not be (null)
+        val nested = Await.result((a ? "any").mapTo[ActorRef], timeout.duration)
+        nested should not be (null)
+        a should not be theSameInstanceAs(nested)
       }
 
     }
 
-    "support reply via channel" in {
-      val serverRef = TestActorRef[ReplyActor].start()
-      val clientRef = TestActorRef(new SenderActor(serverRef)).start()
+    "support reply via sender" in {
+      val serverRef = TestActorRef(Props[ReplyActor])
+      val clientRef = TestActorRef(Props(classOf[SenderActor], serverRef))
 
       counter = 4
 
@@ -143,7 +152,7 @@ class TestActorRefSpec extends WordSpec with MustMatchers with BeforeAndAfterEac
       clientRef ! "simple"
       clientRef ! "simple"
 
-      counter must be(0)
+      counter should be(0)
 
       counter = 4
 
@@ -152,51 +161,65 @@ class TestActorRefSpec extends WordSpec with MustMatchers with BeforeAndAfterEac
       clientRef ! "simple"
       clientRef ! "simple"
 
-      counter must be(0)
+      counter should be(0)
 
-      assertThread
+      assertThread()
     }
 
     "stop when sent a poison pill" in {
-      filterEvents(EventFilter[ActorKilledException]) {
-        val a = TestActorRef[WorkerActor].start()
-        intercept[ActorKilledException] {
-          (a ? PoisonPill).get
+      EventFilter[ActorKilledException]() intercept {
+        val a = TestActorRef(Props[WorkerActor])
+        val forwarder = system.actorOf(Props(new Actor {
+          context.watch(a)
+          def receive = {
+            case t: Terminated ⇒ testActor forward WrappedTerminated(t)
+            case x             ⇒ testActor forward x
+          }
+        }))
+        a.!(PoisonPill)(testActor)
+        expectMsgPF(5 seconds) {
+          case WrappedTerminated(Terminated(`a`)) ⇒ true
         }
-        a must not be ('running)
-        a must be('shutdown)
-        assertThread
+        a.isTerminated should be(true)
+        assertThread()
       }
     }
 
     "restart when Kill:ed" in {
-      filterEvents(EventFilter[ActorKilledException]) {
+      EventFilter[ActorKilledException]() intercept {
         counter = 2
 
-        val boss = TestActorRef(new TActor {
-          self.faultHandler = OneForOneStrategy(List(classOf[Throwable]), Some(2), Some(1000))
-          val ref = TestActorRef(new TActor {
+        val boss = TestActorRef(Props(new TActor {
+          val ref = TestActorRef(Props(new TActor {
             def receiveT = { case _ ⇒ }
             override def preRestart(reason: Throwable, msg: Option[Any]) { counter -= 1 }
             override def postRestart(reason: Throwable) { counter -= 1 }
-          }).start()
-          self.dispatcher = CallingThreadDispatcher.global
-          self link ref
+          }), self, "child")
+
+          override def supervisorStrategy =
+            OneForOneStrategy(maxNrOfRetries = 5, withinTimeRange = 1 second)(List(classOf[ActorKilledException]))
+
           def receiveT = { case "sendKill" ⇒ ref ! Kill }
-        }).start()
+        }))
 
         boss ! "sendKill"
 
-        counter must be(0)
-        assertThread
+        counter should be(0)
+        assertThread()
       }
     }
 
     "support futures" in {
-      val a = TestActorRef[WorkerActor].start()
-      val f = a ? "work" mapTo manifest[String]
-      f must be('completed)
-      f.get must equal("workDone")
+      val a = TestActorRef[WorkerActor]
+      val f = a ? "work"
+      // CallingThreadDispatcher means that there is no delay
+      f should be('completed)
+      Await.result(f, timeout.duration) should equal("workDone")
+    }
+
+    "support receive timeout" in {
+      val a = TestActorRef(new ReceiveTimeoutActor(testActor))
+      expectMsg("timeout")
     }
 
   }
@@ -209,45 +232,38 @@ class TestActorRefSpec extends WordSpec with MustMatchers with BeforeAndAfterEac
         def receiveT = {
           case x: String ⇒ s = x
         }
-      }).start()
+      })
       ref ! "hallo"
       val actor = ref.underlyingActor
-      actor.s must equal("hallo")
+      actor.s should equal("hallo")
     }
 
     "set receiveTimeout to None" in {
       val a = TestActorRef[WorkerActor]
-      a.receiveTimeout must be(None)
+      a.underlyingActor.context.receiveTimeout should be theSameInstanceAs Duration.Undefined
     }
 
     "set CallingThreadDispatcher" in {
       val a = TestActorRef[WorkerActor]
-      a.dispatcher.getClass must be(classOf[CallingThreadDispatcher])
+      a.underlying.dispatcher.getClass should be(classOf[CallingThreadDispatcher])
     }
 
-    "warn about scheduled supervisor" in {
-      val boss = Actor.actorOf(new Actor { def receive = { case _ ⇒ } }).start()
-      val ref = TestActorRef[WorkerActor].start()
-
-      val filter = EventFilter.custom(_ ⇒ true)
-      EventHandler.notify(TestEvent.Mute(filter))
-      val log = TestActorRef[Logger]
-      EventHandler.addListener(log)
-      boss link ref
-      val la = log.underlyingActor
-      la.count must be(1)
-      la.msg must (include("supervisor") and include("CallingThreadDispatcher"))
-      EventHandler.removeListener(log)
-      EventHandler.notify(TestEvent.UnMute(filter))
+    "allow override of dispatcher" in {
+      val a = TestActorRef(Props[WorkerActor].withDispatcher("disp1"))
+      a.underlying.dispatcher.getClass should be(classOf[Dispatcher])
     }
 
-    "proxy apply for the underlying actor" in {
-      val ref = TestActorRef[WorkerActor].start()
-      intercept[IllegalActorStateException] { ref("work") }
-      val ch = Promise.channel()
-      ref ! ch
-      ch must be('completed)
-      ch.get must be("complexReply")
+    "proxy receive for the underlying actor without sender" in {
+      val ref = TestActorRef[WorkerActor]
+      ref.receive("work")
+      ref.isTerminated should be(true)
+    }
+
+    "proxy receive for the underlying actor with sender" in {
+      val ref = TestActorRef[WorkerActor]
+      ref.receive("work", testActor)
+      ref.isTerminated should be(true)
+      expectMsg("workDone")
     }
 
   }

@@ -1,4 +1,6 @@
 package akka.performance.trading.domain
+import akka.performance.workbench.BenchmarkConfig
+import akka.actor.ActorSystem
 
 abstract class Orderbook(val symbol: String) {
   var bidSide: List[Bid] = Nil
@@ -49,13 +51,14 @@ abstract class Orderbook(val symbol: String) {
 
 object Orderbook {
 
-  val useDummyOrderbook = System.getProperty("benchmark.useDummyOrderbook", "false").toBoolean
+  val useDummyOrderbook = BenchmarkConfig.config.getBoolean("benchmark.useDummyOrderbook")
 
-  def apply(symbol: String, standby: Boolean): Orderbook = standby match {
-    case false if !useDummyOrderbook ⇒ new Orderbook(symbol) with SimpleTradeObserver
-    case true if !useDummyOrderbook  ⇒ new Orderbook(symbol) with StandbyTradeObserver
-    case false if useDummyOrderbook  ⇒ new DummyOrderbook(symbol) with SimpleTradeObserver
-    case true if useDummyOrderbook   ⇒ new DummyOrderbook(symbol) with StandbyTradeObserver
+  def apply(symbol: String, standby: Boolean, _system: ActorSystem): Orderbook = (useDummyOrderbook, standby) match {
+    case (false, false) ⇒ new Orderbook(symbol) with NopTradeObserver
+    case (false, true) ⇒ new Orderbook(symbol) with TotalTradeObserver {
+      override def system = _system
+    }
+    case (true, _) ⇒ new DummyOrderbook(symbol) with NopTradeObserver
   }
 }
 

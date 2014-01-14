@@ -1,134 +1,184 @@
 /**
- * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
 
-import akka.japi.{ Creator, Procedure }
+import akka.japi.{ Creator }
 
 /**
+ * Actor base trait that should be extended by or mixed to create an Actor with the semantics of the 'Actor Model':
+ * <a href="http://en.wikipedia.org/wiki/Actor_model">http://en.wikipedia.org/wiki/Actor_model</a>
+ *
+ * This class is the Java cousin to the [[akka.actor.Actor]] Scala interface.
  * Subclass this abstract class to create a MDB-style untyped actor.
- * <p/>
- * This class is meant to be used from Java.
- * <p/>
+ *
+ * An actor has a well-defined (non-cyclic) life-cycle.
+ *  - ''RUNNING'' (created and started actor) - can receive messages
+ *  - ''SHUTDOWN'' (when 'stop' or 'exit' is invoked) - can't do anything
+ *
+ * The Actor's own [[akka.actor.ActorRef]] is available as `getSelf()`, the current
+ * message’s sender as `getSender()` and the [[akka.actor.UntypedActorContext]] as
+ * `getContext()`. The only abstract method is `onReceive()` which is invoked for
+ * each processed message unless dynamically overridden using `getContext().become()`.
+ *
  * Here is an example on how to create and use an UntypedActor:
- * <pre>
+ *
+ * {{{
  *  public class SampleUntypedActor extends UntypedActor {
+ *
+ *    public static class Reply implements java.io.Serializable {
+ *      final public ActorRef sender;
+ *      final public Result result;
+ *      Reply(ActorRef sender, Result result) {
+ *        this.sender = sender;
+ *        this.result = result;
+ *      }
+ *    }
+ *
+ *   private static SupervisorStrategy strategy = new OneForOneStrategy(10, Duration.create("1 minute"),
+ *     new Function<Throwable, Directive>() {
+ *       @Override
+ *       public Directive apply(Throwable t) {
+ *         if (t instanceof ArithmeticException) {
+ *           return resume();
+ *         } else if (t instanceof NullPointerException) {
+ *           return restart();
+ *         } else if (t instanceof IllegalArgumentException) {
+ *           return stop();
+ *         } else {
+ *           return escalate();
+ *         }
+ *       }
+ *     });
+ *
+ *   @Override
+ *   public SupervisorStrategy supervisorStrategy() {
+ *     return strategy;
+ *    }
+ *
  *    public void onReceive(Object message) throws Exception {
  *      if (message instanceof String) {
- *        String msg = (String)message;
+ *        String msg = (String) message;
  *
- *        if (msg.equals("UseReply")) {
- *          // Reply to original sender of message using the 'reply' method
- *          getContext().reply(msg + ":" + getContext().getUuid());
- *
- *        } else if (msg.equals("UseSender") && getContext().getSender().isDefined()) {
- *          // Reply to original sender of message using the sender reference
- *          // also passing along my own reference (the context)
- *          getContext().getSender().get().tell(msg, context);
- *
- *        } else if (msg.equals("UseSenderFuture") && getContext().getSenderFuture().isDefined()) {
- *          // Reply to original sender of message using the sender future reference
- *          getContext().getSenderFuture().get().completeWithResult(msg);
+ *        if (msg.equals("UseSender")) {
+ *          // Reply to original sender of message
+ *          getSender().tell(msg, getSelf());
  *
  *        } else if (msg.equals("SendToSelf")) {
  *          // Send message to the actor itself recursively
- *          getContext().tell(msg)
+ *          getSelf().tell("SomeOtherMessage", getSelf());
  *
- *        } else if (msg.equals("ForwardMessage")) {
- *          // Retreive an actor from the ActorRegistry by ID and get an ActorRef back
- *          ActorRef actorRef = Actor.registry.local.actorsFor("some-actor-id").head();
+ *        } else if (msg.equals("ErrorKernelWithDirectReply")) {
+ *          // Send work to one-off child which will reply directly to original sender
+ *          getContext().actorOf(Props.create(Worker.class)).tell("DoSomeDangerousWork", getSender());
  *
- *        } else throw new IllegalArgumentException("Unknown message: " + message);
- *      } else throw new IllegalArgumentException("Unknown message: " + message);
- *    }
+ *        } else if (msg.equals("ErrorKernelWithReplyHere")) {
+ *          // Send work to one-off child and collect the answer, reply handled further down
+ *          getContext().actorOf(Props.create(Worker.class)).tell("DoWorkAndReplyToMe", getSelf());
  *
- *    public static void main(String[] args) {
- *      ActorRef actor = Actors.actorOf(SampleUntypedActor.class);
- *      actor.start();
- *      actor.tell("SendToSelf");
- *      actor.stop();
+ *        } else {
+ *          unhandled(message);
+ *        }
+ *
+ *      } else if (message instanceof Reply) {
+ *
+ *        final Reply reply = (Reply) message;
+ *        // might want to do some processing/book-keeping here
+ *        reply.sender.tell(reply.result, getSelf());
+ *
+ *      } else {
+ *        unhandled(message);
+ *      }
  *    }
  *  }
- * </pre>
- *
- * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
+ * }}}
  */
 abstract class UntypedActor extends Actor {
 
   /**
-   * To be implemented by concrete UntypedActor. Defines the message handler.
+   * To be implemented by concrete UntypedActor, this defines the behavior of the
+   * UntypedActor.
    */
   @throws(classOf[Exception])
   def onReceive(message: Any): Unit
 
   /**
-   * Returns the 'self' reference with the API.
+   * Returns this UntypedActor's UntypedActorContext
+   * The UntypedActorContext is not thread safe so do not expose it outside of the
+   * UntypedActor.
    */
-  def getContext(): ActorRef = self
+  def getContext(): UntypedActorContext = context.asInstanceOf[UntypedActorContext]
 
   /**
-   * Returns the 'self' reference with the API.
+   * Returns the ActorRef for this actor.
    */
-  def context(): ActorRef = self
+  def getSelf(): ActorRef = self
 
   /**
-   * Java API for become
+   * The reference sender Actor of the currently processed message. This is
+   * always a legal destination to send to, even if there is no logical recipient
+   * for the reply, in which case it will be sent to the dead letter mailbox.
    */
-  def become(behavior: Procedure[Any]): Unit = become(behavior, false)
-
-  /*
-   * Java API for become with optional discardOld
-   */
-  def become(behavior: Procedure[Any], discardOld: Boolean): Unit =
-    super.become({ case msg ⇒ behavior.apply(msg) }, discardOld)
+  def getSender(): ActorRef = sender
 
   /**
-   * User overridable callback.
-   * <p/>
-   * Is called when an Actor is started by invoking 'actor.start()'.
+   * User overridable definition the strategy to use for supervising
+   * child actors.
    */
-  override def preStart() {}
+  override def supervisorStrategy: SupervisorStrategy = super.supervisorStrategy
 
   /**
    * User overridable callback.
    * <p/>
-   * Is called when 'actor.stop()' is invoked.
+   * Is called when an Actor is started.
+   * Actor are automatically started asynchronously when created.
+   * Empty default implementation.
    */
-  override def postStop() {}
+  @throws(classOf[Exception])
+  override def preStart(): Unit = super.preStart()
 
   /**
    * User overridable callback.
    * <p/>
-   * Is called on a crashed Actor right BEFORE it is restarted to allow clean up of resources before Actor is terminated.
+   * Is called asynchronously after 'actor.stop()' is invoked.
+   * Empty default implementation.
    */
-  override def preRestart(reason: Throwable, lastMessage: Option[Any]) {}
+  @throws(classOf[Exception])
+  override def postStop(): Unit = super.postStop()
 
   /**
-   * User overridable callback.
+   * User overridable callback: '''By default it disposes of all children and then calls `postStop()`.'''
+   * <p/>
+   * Is called on a crashed Actor right BEFORE it is restarted to allow clean
+   * up of resources before Actor is terminated.
+   */
+  @throws(classOf[Exception])
+  override def preRestart(reason: Throwable, message: Option[Any]): Unit = super.preRestart(reason, message)
+
+  /**
+   * User overridable callback: By default it calls `preStart()`.
    * <p/>
    * Is called right AFTER restart on the newly created Actor to allow reinitialization after an Actor crash.
    */
-  override def postRestart(reason: Throwable) {}
+  @throws(classOf[Exception])
+  override def postRestart(reason: Throwable): Unit = super.postRestart(reason)
+
+  final def receive = { case msg ⇒ onReceive(msg) }
 
   /**
-   * User overridable callback.
-   * <p/>
-   * Is called when a message isn't handled by the current behavior of the actor
-   * by default it throws an UnhandledMessageException
+   * Recommended convention is to call this method if the message
+   * isn't handled in [[#onReceive]] (e.g. unknown message type).
+   * By default it fails with either a [[akka.actor.DeathPactException]] (in
+   * case of an unhandled [[akka.actor.Terminated]] message) or publishes an [[akka.actor.UnhandledMessage]]
+   * to the actor's system's [[akka.event.EventStream]].
    */
-  override def unhandled(msg: Any) {
-    throw new UnhandledMessageException(msg, self)
-  }
+  override def unhandled(message: Any): Unit = super.unhandled(message)
 
-  final protected def receive = {
-    case msg ⇒ onReceive(msg)
-  }
 }
 
 /**
  * Factory closure for an UntypedActor, to be used with 'Actors.actorOf(factory)'.
- *
- * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
-trait UntypedActorFactory extends Creator[Actor]
+@deprecated("use Creator<T> instead", "2.2")
+trait UntypedActorFactory extends Creator[Actor] with Serializable

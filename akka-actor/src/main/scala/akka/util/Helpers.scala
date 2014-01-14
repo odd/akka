@@ -1,124 +1,108 @@
 /**
- * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
  */
-
 package akka.util
 
-import akka.event.EventHandler
+import java.util.Comparator
+import scala.annotation.tailrec
+import java.util.regex.Pattern
 
-/**
- * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
- */
 object Helpers {
 
-  implicit def null2Option[T](t: T): Option[T] = Option(t)
+  val isWindows: Boolean = System.getProperty("os.name", "").toLowerCase.indexOf("win") >= 0
 
-  def intToBytes(value: Int): Array[Byte] = {
-    val bytes = new Array[Byte](4)
-    bytes(0) = (value >>> 24).asInstanceOf[Byte]
-    bytes(1) = (value >>> 16).asInstanceOf[Byte]
-    bytes(2) = (value >>> 8).asInstanceOf[Byte]
-    bytes(3) = value.asInstanceOf[Byte]
-    bytes
+  def makePattern(s: String): Pattern = Pattern.compile("^\\Q" + s.replace("?", "\\E.\\Q").replace("*", "\\E.*\\Q") + "\\E$")
+
+  def compareIdentityHash(a: AnyRef, b: AnyRef): Int = {
+    /*
+     * make sure that there is no overflow or underflow in comparisons, so
+     * that the ordering is actually consistent and you cannot have a
+     * sequence which cyclically is monotone without end.
+     */
+    val diff = ((System.identityHashCode(a) & 0xffffffffL) - (System.identityHashCode(b) & 0xffffffffL))
+    if (diff > 0) 1 else if (diff < 0) -1 else 0
   }
 
-  def bytesToInt(bytes: Array[Byte], offset: Int): Int = {
-    (0 until 4).foldLeft(0)((value, index) ⇒ value + ((bytes(index + offset) & 0x000000FF) << ((4 - 1 - index) * 8)))
-  }
-
-  def flatten[T: ClassManifest](array: Array[Any]) = array.flatMap {
-    case arr: Array[T] ⇒ arr
-    case elem: T       ⇒ Array(elem)
-  }
-
-  def ignore[E: Manifest](body: ⇒ Unit) {
-    try {
-      body
-    } catch {
-      case e if manifest[E].erasure.isAssignableFrom(e.getClass) ⇒ ()
-    }
-  }
-
-  def withPrintStackTraceOnError(body: ⇒ Unit) {
-    try {
-      body
-    } catch {
-      case e: Throwable ⇒
-        EventHandler.error(e, this, e.toString)
-        throw e
+  /**
+   * Create a comparator which will efficiently use `System.identityHashCode`,
+   * unless that happens to be the same for two non-equals objects, in which
+   * case the supplied “real” comparator is used; the comparator must be
+   * consistent with equals, otherwise it would not be an enhancement over
+   * the identityHashCode.
+   */
+  def identityHashComparator[T <: AnyRef](comp: Comparator[T]): Comparator[T] = new Comparator[T] {
+    def compare(a: T, b: T): Int = compareIdentityHash(a, b) match {
+      case 0 if a != b ⇒ comp.compare(a, b)
+      case x           ⇒ x
     }
   }
 
   /**
-   * Convenience helper to cast the given Option of Any to an Option of the given type. Will throw a ClassCastException
-   * if the actual type is not assignable from the given one.
+   * Converts a "currentTimeMillis"-obtained timestamp accordingly:
+   *   "$hours%02d:$minutes%02d:$seconds%02d.$ms%03dUTC"
+   * @param timestamp a "currentTimeMillis"-obtained timestamp
+   * @return A String formatted like: $hours%02d:$minutes%02d:$seconds%02d.$ms%03dUTC
    */
-  def narrow[T](o: Option[Any]): Option[T] = {
-    require((o ne null), "Option to be narrowed must not be null!")
-    o.asInstanceOf[Option[T]]
+  def currentTimeMillisToUTCString(timestamp: Long): String = {
+    val timeOfDay = timestamp % 86400000L
+    val hours = timeOfDay / 3600000L
+    val minutes = timeOfDay / 60000L % 60
+    val seconds = timeOfDay / 1000L % 60
+    val ms = timeOfDay % 1000
+    f"$hours%02d:$minutes%02d:$seconds%02d.$ms%03dUTC"
+  }
+
+  final val base64chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+~"
+
+  @tailrec
+  def base64(l: Long, sb: java.lang.StringBuilder = new java.lang.StringBuilder("$")): String = {
+    sb append base64chars.charAt(l.toInt & 63)
+    val next = l >>> 6
+    if (next == 0) sb.toString
+    else base64(next, sb)
   }
 
   /**
-   * Convenience helper to cast the given Option of Any to an Option of the given type. Will swallow a possible
-   * ClassCastException and return None in that case.
+   * Implicit class providing `requiring` methods. This class is based on
+   * `Predef.ensuring` in the Scala standard library. The difference is that
+   * this class's methods throw `IllegalArgumentException`s rather than
+   * `AssertionError`s.
+   *
+   * An example adapted from `Predef`'s documentation:
+   * {{{
+   * import akka.util.Helpers.Requiring
+   *
+   * def addNaturals(nats: List[Int]): Int = {
+   *   require(nats forall (_ >= 0), "List contains negative numbers")
+   *   nats.foldLeft(0)(_ + _)
+   * } requiring(_ >= 0)
+   * }}}
+   *
+   * @param value The value to check.
    */
-  def narrowSilently[T: Manifest](o: Option[Any]): Option[T] =
-    try {
-      narrow(o)
-    } catch {
-      case e: ClassCastException ⇒
-        None
+  @inline final implicit class Requiring[A](val value: A) extends AnyVal {
+    /**
+     * Check that a condition is true. If true, return `value`, otherwise throw
+     * an `IllegalArgumentException` with the given message.
+     *
+     * @param cond The condition to check.
+     * @param msg The message to report if the condition isn't met.
+     */
+    @inline def requiring(cond: Boolean, msg: ⇒ Any): A = {
+      require(cond, msg)
+      value
     }
 
-  /**
-   * Reference that can hold either a typed value or an exception.
-   *
-   * Usage:
-   * <pre>
-   * scala> ResultOrError(1)
-   * res0: ResultOrError[Int] = ResultOrError@a96606
-   *
-   * scala> res0()
-   * res1: Int = 1
-   *
-   * scala> res0() = 3
-   *
-   * scala> res0()
-   * res3: Int = 3
-   *
-   * scala> res0() = { println("Hello world"); 3}
-   * Hello world
-   *
-   * scala> res0()
-   * res5: Int = 3
-   *
-   * scala> res0() = error("Lets see what happens here...")
-   *
-   * scala> res0()
-   * java.lang.RuntimeException: Lets see what happens here...
-   *    at ResultOrError.apply(Helper.scala:11)
-   *    at .<init>(<console>:6)
-   *    at .<clinit>(<console>)
-   *    at Re...
-   * </pre>
-   */
-  class ResultOrError[R](result: R) {
-    private[this] var contents: Either[R, Throwable] = Left(result)
-
-    def update(value: ⇒ R) {
-      contents = try {
-        Left(value)
-      } catch {
-        case (error: Throwable) ⇒ Right(error)
-      }
+    /**
+     * Check that a condition is true for the `value`. If true, return `value`,
+     * otherwise throw an `IllegalArgumentException` with the given message.
+     *
+     * @param cond The function used to check the `value`.
+     * @param msg The message to report if the condition isn't met.
+     */
+    @inline def requiring(cond: A ⇒ Boolean, msg: ⇒ Any): A = {
+      require(cond(value), msg)
+      value
     }
-
-    def apply() = contents match {
-      case Left(result) ⇒ result
-      case Right(error) ⇒ throw error.fillInStackTrace
-    }
-  }
-  object ResultOrError {
-    def apply[R](result: R) = new ResultOrError(result)
   }
 }

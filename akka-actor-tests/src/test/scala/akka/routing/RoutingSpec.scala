@@ -1,319 +1,253 @@
+/**
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ */
 package akka.routing
 
-import org.scalatest.WordSpec
-import org.scalatest.matchers.MustMatchers
-import akka.routing._
-import akka.routing.Router
+import language.postfixOps
+
+import akka.actor._
+import scala.collection.immutable
+import akka.testkit._
+import scala.concurrent.duration._
+import scala.concurrent.Await
+import akka.ConfigurationException
+import com.typesafe.config.ConfigFactory
+import akka.pattern.{ ask, pipe }
+import java.util.concurrent.ConcurrentHashMap
+import com.typesafe.config.Config
+import akka.dispatch.Dispatchers
+import akka.util.Collections.EmptyImmutableSeq
+import akka.util.Timeout
 import java.util.concurrent.atomic.AtomicInteger
-import akka.actor.Actor._
-import akka.actor.{ ActorRef, Actor }
-import collection.mutable.LinkedList
-import akka.routing.Routing.Broadcast
-import java.util.concurrent.{ CountDownLatch, TimeUnit }
+import akka.routing._
 
 object RoutingSpec {
 
-  class TestActor extends Actor with Serializable {
-    def receive = {
-      case _ ⇒
-        println("Hello")
-    }
-  }
-}
-
-class RoutingSpec extends WordSpec with MustMatchers {
-
-  import akka.routing.RoutingSpec._
-
-  "direct router" must {
-    "be started when constructed" in {
-      val actor1 = Actor.actorOf[TestActor].start
-
-      val actor = Routing.actorOf("foo", List(actor1), RouterType.Direct)
-      actor.isRunning must be(true)
-    }
-
-    "throw IllegalArgumentException at construction when no connections" in {
-      try {
-        Routing.actorOf("foo", List(), RouterType.Direct)
-        fail()
-      } catch {
-        case e: IllegalArgumentException ⇒
+  val config = """
+    akka.actor.serialize-messages = off
+    akka.actor.deployment {
+      /router1 {
+        router = round-robin-pool
+        nr-of-instances = 3
+      }
+      /router2 {
+        router = round-robin-pool
+        nr-of-instances = 3
+      }
+      /router3 {
+        router = round-robin-pool
+        nr-of-instances = 0
       }
     }
+    """
+
+  class TestActor extends Actor {
+    def receive = { case _ ⇒ }
+  }
+
+  class Echo extends Actor {
+    def receive = {
+      case _ ⇒ sender ! self
+    }
+  }
+
+}
+
+@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
+class RoutingSpec extends AkkaSpec(RoutingSpec.config) with DefaultTimeout with ImplicitSender {
+  implicit val ec = system.dispatcher
+  import RoutingSpec._
+
+  muteDeadLetters(classOf[akka.dispatch.sysmsg.DeathWatchNotification])()
+
+  "routers in general" must {
+
+    "evict terminated routees" in {
+      val router = system.actorOf(RoundRobinPool(2).props(routeeProps = Props[Echo]))
+      router ! ""
+      router ! ""
+      val c1, c2 = expectMsgType[ActorRef]
+      watch(router)
+      watch(c2)
+      system.stop(c2)
+      expectTerminated(c2).existenceConfirmed should equal(true)
+      // it might take a while until the Router has actually processed the Terminated message
+      awaitCond {
+        router ! ""
+        router ! ""
+        val res = receiveWhile(100 millis, messages = 2) {
+          case x: ActorRef ⇒ x
+        }
+        res == Seq(c1, c1)
+      }
+      system.stop(c1)
+      expectTerminated(router).existenceConfirmed should equal(true)
+    }
+
+    "not terminate when resizer is used" in {
+      val latch = TestLatch(1)
+      val resizer = new Resizer {
+        def isTimeForResize(messageCounter: Long): Boolean = messageCounter == 0
+        def resize(currentRoutees: immutable.IndexedSeq[Routee]): Int = {
+          latch.countDown()
+          2
+        }
+      }
+      val router = system.actorOf(RoundRobinPool(nrOfInstances = 0, resizer = Some(resizer)).props(
+        routeeProps = Props[TestActor]))
+      watch(router)
+      Await.ready(latch, remaining)
+      router ! GetRoutees
+      val routees = expectMsgType[Routees].routees
+      routees.size should be(2)
+      routees foreach { _.send(PoisonPill, testActor) }
+      // expect no Terminated
+      expectNoMsg(2.seconds)
+    }
+
+    "use configured nr-of-instances when FromConfig" in {
+      val router = system.actorOf(FromConfig.props(routeeProps = Props[TestActor]), "router1")
+      router ! GetRoutees
+      expectMsgType[Routees].routees.size should be(3)
+      watch(router)
+      system.stop(router)
+      expectTerminated(router)
+    }
+
+    "use configured nr-of-instances when router is specified" in {
+      val router = system.actorOf(RoundRobinPool(nrOfInstances = 2).props(routeeProps = Props[TestActor]), "router2")
+      router ! GetRoutees
+      expectMsgType[Routees].routees.size should be(3)
+      system.stop(router)
+    }
+
+    "use specified resizer when resizer not configured" in {
+      val latch = TestLatch(1)
+      val resizer = new Resizer {
+        def isTimeForResize(messageCounter: Long): Boolean = messageCounter == 0
+        def resize(currentRoutees: immutable.IndexedSeq[Routee]): Int = {
+          latch.countDown()
+          3
+        }
+      }
+      val router = system.actorOf(RoundRobinPool(nrOfInstances = 0, resizer = Some(resizer)).props(
+        routeeProps = Props[TestActor]), "router3")
+      Await.ready(latch, remaining)
+      router ! GetRoutees
+      expectMsgType[Routees].routees.size should be(3)
+      system.stop(router)
+    }
+
+    "set supplied supervisorStrategy" in {
+      //#supervision
+      val escalator = OneForOneStrategy() {
+        //#custom-strategy
+        case e ⇒ testActor ! e; SupervisorStrategy.Escalate
+        //#custom-strategy
+      }
+      val router = system.actorOf(RoundRobinPool(1, supervisorStrategy = escalator).props(
+        routeeProps = Props[TestActor]))
+      //#supervision
+      router ! GetRoutees
+      EventFilter[ActorKilledException](occurrences = 1) intercept {
+        expectMsgType[Routees].routees.head.send(Kill, testActor)
+      }
+      expectMsgType[ActorKilledException]
+
+      val router2 = system.actorOf(RoundRobinPool(1).withSupervisorStrategy(escalator).props(
+        routeeProps = Props[TestActor]))
+      router2 ! GetRoutees
+      EventFilter[ActorKilledException](occurrences = 1) intercept {
+        expectMsgType[Routees].routees.head.send(Kill, testActor)
+      }
+      expectMsgType[ActorKilledException]
+    }
+
+    "set supplied supervisorStrategy for FromConfig" in {
+      val escalator = OneForOneStrategy() {
+        case e ⇒ testActor ! e; SupervisorStrategy.Escalate
+      }
+      val router = system.actorOf(FromConfig.withSupervisorStrategy(escalator).props(
+        routeeProps = Props[TestActor]), "router1")
+      router ! GetRoutees
+      EventFilter[ActorKilledException](occurrences = 1) intercept {
+        expectMsgType[Routees].routees.head.send(Kill, testActor)
+      }
+      expectMsgType[ActorKilledException]
+    }
+
+    "default to all-for-one-always-escalate strategy" in {
+      val restarter = OneForOneStrategy() {
+        case e ⇒ testActor ! e; SupervisorStrategy.Restart
+      }
+      val supervisor = system.actorOf(Props(new Supervisor(restarter)))
+      supervisor ! RoundRobinPool(3).props(routeeProps = Props(new Actor {
+        def receive = {
+          case x: String ⇒ throw new Exception(x)
+        }
+        override def postRestart(reason: Throwable): Unit = testActor ! "restarted"
+      }))
+      val router = expectMsgType[ActorRef]
+      EventFilter[Exception]("die", occurrences = 1) intercept {
+        router ! "die"
+      }
+      expectMsgType[Exception].getMessage should be("die")
+      expectMsg("restarted")
+      expectMsg("restarted")
+      expectMsg("restarted")
+    }
+
+    "start in-line for context.actorOf()" in {
+      system.actorOf(Props(new Actor {
+        def receive = {
+          case "start" ⇒
+            context.actorOf(RoundRobinPool(2).props(routeeProps = Props(new Actor {
+              def receive = { case x ⇒ sender ! x }
+            }))) ? "hello" pipeTo sender
+        }
+      })) ! "start"
+      expectMsg("hello")
+    }
+
+  }
+
+  "no router" must {
 
     "send message to connection" in {
-      val doneLatch = new CountDownLatch(1)
-
-      val counter = new AtomicInteger(0)
-      val connection1 = actorOf(new Actor {
+      class Actor1 extends Actor {
         def receive = {
-          case "end" ⇒ doneLatch.countDown()
-          case _     ⇒ counter.incrementAndGet
+          case msg ⇒ testActor forward msg
         }
-      }).start()
+      }
 
-      val routedActor = Routing.actorOf("foo", List(connection1), RouterType.Direct)
+      val routedActor = system.actorOf(NoRouter.props(routeeProps = Props(new Actor1)))
       routedActor ! "hello"
       routedActor ! "end"
 
-      doneLatch.await(5, TimeUnit.SECONDS) must be(true)
-
-      counter.get must be(1)
-    }
-
-    "deliver a broadcast message" in {
-      val doneLatch = new CountDownLatch(1)
-
-      val counter1 = new AtomicInteger
-      val connection1 = actorOf(new Actor {
-        def receive = {
-          case "end"    ⇒ doneLatch.countDown()
-          case msg: Int ⇒ counter1.addAndGet(msg)
-        }
-      }).start()
-
-      val actor = Routing.actorOf("foo", List(connection1), RouterType.Direct)
-
-      actor ! Broadcast(1)
-      actor ! "end"
-
-      doneLatch.await(5, TimeUnit.SECONDS) must be(true)
-
-      counter1.get must be(1)
+      expectMsg("hello")
+      expectMsg("end")
     }
   }
 
-  "round robin router" must {
-
-    "be started when constructed" in {
-      val actor1 = Actor.actorOf[TestActor].start
-
-      val actor = Routing.actorOf("foo", List(actor1), RouterType.RoundRobin)
-      actor.isRunning must be(true)
+  "router FromConfig" must {
+    "throw suitable exception when not configured" in {
+      val e = intercept[ConfigurationException] {
+        system.actorOf(FromConfig.props(routeeProps = Props[TestActor]), "routerNotDefined")
+      }
+      e.getMessage should include("routerNotDefined")
     }
 
-    "throw IllegalArgumentException at construction when no connections" in {
+    "allow external configuration" in {
+      val sys = ActorSystem("FromConfig", ConfigFactory
+        .parseString("akka.actor.deployment./routed.router=round-robin")
+        .withFallback(system.settings.config))
       try {
-        Routing.actorOf("foo", List(), RouterType.RoundRobin)
-        fail()
-      } catch {
-        case e: IllegalArgumentException ⇒
+        sys.actorOf(FromConfig.props(), "routed")
+      } finally {
+        shutdown(sys)
       }
     }
 
-    //In this test a bunch of actors are created and each actor has its own counter.
-    //to test round robin, the routed actor receives the following sequence of messages 1 2 3 .. 1 2 3 .. 1 2 3 which it
-    //uses to increment his counter.
-    //So after n iteration, the first actor his counter should be 1*n, the second 2*n etc etc.
-    "deliver messages in a round robin fashion" in {
-      val connectionCount = 10
-      val iterationCount = 10
-      val doneLatch = new CountDownLatch(connectionCount)
-
-      //lets create some connections.
-      var connections = new LinkedList[ActorRef]
-      var counters = new LinkedList[AtomicInteger]
-      for (i ← 0 until connectionCount) {
-        counters = counters :+ new AtomicInteger()
-
-        val connection = actorOf(new Actor {
-          def receive = {
-            case "end"    ⇒ doneLatch.countDown()
-            case msg: Int ⇒ counters.get(i).get.addAndGet(msg)
-          }
-        }).start()
-        connections = connections :+ connection
-      }
-
-      //create the routed actor.
-      val actor = Routing.actorOf("foo", connections, RouterType.RoundRobin)
-
-      //send messages to the actor.
-      for (i ← 0 until iterationCount) {
-        for (k ← 0 until connectionCount) {
-          actor ! (k + 1)
-        }
-      }
-
-      actor ! Broadcast("end")
-      //now wait some and do validations.
-      doneLatch.await(5, TimeUnit.SECONDS) must be(true)
-
-      for (i ← 0 until connectionCount) {
-        val counter = counters.get(i).get
-        counter.get must be((iterationCount * (i + 1)))
-      }
-    }
-
-    "deliver a broadcast message using the !" in {
-      val doneLatch = new CountDownLatch(2)
-
-      val counter1 = new AtomicInteger
-      val connection1 = actorOf(new Actor {
-        def receive = {
-          case "end"    ⇒ doneLatch.countDown()
-          case msg: Int ⇒ counter1.addAndGet(msg)
-        }
-      }).start()
-
-      val counter2 = new AtomicInteger
-      val connection2 = actorOf(new Actor {
-        def receive = {
-          case "end"    ⇒ doneLatch.countDown()
-          case msg: Int ⇒ counter2.addAndGet(msg)
-        }
-      }).start()
-
-      val actor = Routing.actorOf("foo", List(connection1, connection2), RouterType.RoundRobin)
-
-      actor ! Broadcast(1)
-      actor ! Broadcast("end")
-
-      doneLatch.await(5, TimeUnit.SECONDS) must be(true)
-
-      counter1.get must be(1)
-      counter2.get must be(1)
-    }
-
-    "fail to deliver a broadcast message using the ?" in {
-      val doneLatch = new CountDownLatch(1)
-
-      val counter1 = new AtomicInteger
-      val connection1 = actorOf(new Actor {
-        def receive = {
-          case "end" ⇒ doneLatch.countDown()
-          case _     ⇒ counter1.incrementAndGet()
-        }
-      }).start()
-
-      val actor = Routing.actorOf("foo", List(connection1), RouterType.RoundRobin)
-
-      try {
-        actor ? Broadcast(1)
-        fail()
-      } catch {
-        case e: RoutingException ⇒
-      }
-
-      actor ! "end"
-      doneLatch.await(5, TimeUnit.SECONDS) must be(true)
-      counter1.get must be(0)
-    }
   }
 
-  "random router" must {
-
-    "be started when constructed" in {
-
-      val actor1 = Actor.actorOf[TestActor].start
-
-      val actor = Routing.actorOf("foo", List(actor1), RouterType.Random)
-      actor.isRunning must be(true)
-    }
-
-    "throw IllegalArgumentException at construction when no connections" in {
-      try {
-        Routing.actorOf("foo", List(), RouterType.Random)
-        fail()
-      } catch {
-        case e: IllegalArgumentException ⇒
-      }
-    }
-
-    "deliver messages in a random fashion" in {
-
-    }
-
-    "deliver a broadcast message" in {
-      val doneLatch = new CountDownLatch(2)
-
-      val counter1 = new AtomicInteger
-      val connection1 = actorOf(new Actor {
-        def receive = {
-          case "end"    ⇒ doneLatch.countDown()
-          case msg: Int ⇒ counter1.addAndGet(msg)
-        }
-      }).start()
-
-      val counter2 = new AtomicInteger
-      val connection2 = actorOf(new Actor {
-        def receive = {
-          case "end"    ⇒ doneLatch.countDown()
-          case msg: Int ⇒ counter2.addAndGet(msg)
-        }
-      }).start()
-
-      val actor = Routing.actorOf("foo", List(connection1, connection2), RouterType.Random)
-
-      actor ! Broadcast(1)
-      actor ! Broadcast("end")
-
-      doneLatch.await(5, TimeUnit.SECONDS) must be(true)
-
-      counter1.get must be(1)
-      counter2.get must be(1)
-    }
-
-    "fail to deliver a broadcast message using the ?" in {
-      val doneLatch = new CountDownLatch(1)
-
-      val counter1 = new AtomicInteger
-      val connection1 = actorOf(new Actor {
-        def receive = {
-          case "end" ⇒ doneLatch.countDown()
-          case _     ⇒ counter1.incrementAndGet()
-        }
-      }).start()
-
-      val actor = Routing.actorOf("foo", List(connection1), RouterType.Random)
-
-      try {
-        actor ? Broadcast(1)
-        fail()
-      } catch {
-        case e: RoutingException ⇒
-      }
-
-      actor ! "end"
-      doneLatch.await(5, TimeUnit.SECONDS) must be(true)
-      counter1.get must be(0)
-    }
-  }
-
-  "least cpu router" must {
-    "throw IllegalArgumentException when constructed" in {
-      val actor1 = Actor.actorOf[TestActor].start
-
-      try {
-        Routing.actorOf("foo", List(actor1), RouterType.LeastCPU)
-      } catch {
-        case e: IllegalArgumentException ⇒
-      }
-    }
-  }
-
-  "least ram router" must {
-    "throw IllegalArgumentException when constructed" in {
-      val actor1 = Actor.actorOf[TestActor].start
-
-      try {
-        Routing.actorOf("foo", List(actor1), RouterType.LeastRAM)
-      } catch {
-        case e: IllegalArgumentException ⇒
-      }
-    }
-  }
-
-  "smallest mailbox" must {
-    "throw IllegalArgumentException when constructed" in {
-      val actor1 = Actor.actorOf[TestActor].start
-
-      try {
-        Routing.actorOf("foo", List(actor1), RouterType.LeastMessages)
-      } catch {
-        case e: IllegalArgumentException ⇒
-      }
-    }
-  }
 }

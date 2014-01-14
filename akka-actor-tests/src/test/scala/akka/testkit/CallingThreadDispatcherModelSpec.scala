@@ -1,54 +1,57 @@
 /**
- * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.testkit
 
+import java.util.concurrent.atomic.AtomicInteger
 import akka.actor.dispatch.ActorModelSpec
-import java.util.concurrent.CountDownLatch
-import org.junit.{ After, Test }
+import com.typesafe.config.Config
+import akka.dispatch.DispatcherPrerequisites
+import akka.dispatch.MessageDispatcher
+import akka.dispatch.MessageDispatcherConfigurator
+import akka.dispatch.UnboundedMailbox
 
-class CallingThreadDispatcherModelSpec extends ActorModelSpec {
+object CallingThreadDispatcherModelSpec {
   import ActorModelSpec._
-  def newInterceptedDispatcher = new CallingThreadDispatcher with MessageDispatcherInterceptor
 
-  // A CallingThreadDispatcher can by design not process messages in parallel,
-  // so disable this test
-  override def dispatcherShouldProcessMessagesInParallel {}
-
-  // This test needs to be adapted: CTD runs the flood completely sequentially
-  // with start, invocation, stop, schedule shutdown, abort shutdown, repeat;
-  // add "keeper" actor to lock down the dispatcher instance, since the
-  // frequent attempted shutdown seems rather costly (random timing failures
-  // without this fix)
-  override def dispatcherShouldHandleWavesOfActors {
-    implicit val dispatcher = newInterceptedDispatcher
-
-    def flood(num: Int) {
-      val cachedMessage = CountDownNStop(new CountDownLatch(num))
-      val keeper = newTestActor.start()
-      (1 to num) foreach { _ ⇒
-        newTestActor.start() ! cachedMessage
+  val config = {
+    """
+      boss {
+        executor = thread-pool-executor
+        type = PinnedDispatcher
       }
-      keeper.stop()
-      assertCountDown(cachedMessage.latch, 10000, "Should process " + num + " countdowns")
-    }
-    for (run ← 1 to 3) {
-      flood(10000)
-      await(dispatcher.stops.get == run)(withinMs = 10000)
-      assertDispatcher(dispatcher)(starts = run, stops = run)
-    }
+    """ +
+      // use unique dispatcher id for each test, since MessageDispatcherInterceptor holds state
+      (for (n ← 1 to 30) yield """
+        test-calling-thread-%s {
+          type = "akka.testkit.CallingThreadDispatcherModelSpec$CallingThreadDispatcherInterceptorConfigurator"
+        }""".format(n)).mkString
   }
 
-  override def dispatcherShouldCompleteAllUncompletedSenderFuturesOnDeregister {
-    //Can't handle this...
-  }
+  class CallingThreadDispatcherInterceptorConfigurator(config: Config, prerequisites: DispatcherPrerequisites)
+    extends MessageDispatcherConfigurator(config, prerequisites) {
 
-  @After
-  def after {
-    //remove the interrupted status since we are messing with interrupted exceptions.
-    Thread.interrupted()
+    private val instance: MessageDispatcher =
+      new CallingThreadDispatcher(this) with MessageDispatcherInterceptor {
+        override def id: String = config.getString("id")
+      }
+
+    override def dispatcher(): MessageDispatcher = instance
+
   }
 
 }
 
-// vim: set ts=2 sw=2 et:
+@org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
+class CallingThreadDispatcherModelSpec extends ActorModelSpec(CallingThreadDispatcherModelSpec.config) {
+  import ActorModelSpec._
+
+  val dispatcherCount = new AtomicInteger()
+
+  override def interceptedDispatcher(): MessageDispatcherInterceptor = {
+    // use new id for each test, since the MessageDispatcherInterceptor holds state
+    system.dispatchers.lookup("test-calling-thread-" + dispatcherCount.incrementAndGet()).asInstanceOf[MessageDispatcherInterceptor]
+  }
+  override def dispatcherType = "Calling Thread Dispatcher"
+
+}

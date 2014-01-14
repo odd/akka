@@ -1,7 +1,10 @@
 package akka.actor;
 
 public class JavaAPITestActor extends UntypedActor {
-    public void onReceive(Object msg) {
-        getContext().tryReply("got it!");
-    }
+  public static String ANSWER = "got it!";
+
+  public void onReceive(Object msg) {
+    getSender().tell(ANSWER, getSelf());
+    getContext().getChildren();
+  }
 }

@@ -1,240 +1,272 @@
 /**
- *   Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
+ *   Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.dispatch
 
-import akka.actor.{ Actor, ActorRef }
-import akka.actor.newUuid
-import akka.config.Config._
-import akka.util.{ Duration, ReflectiveAccess }
-
-import akka.config.Configuration
-
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{ ConcurrentHashMap, TimeUnit, ThreadFactory }
+import com.typesafe.config.{ ConfigFactory, Config }
+import akka.actor.{ Scheduler, DynamicAccess, ActorSystem }
+import akka.event.Logging.Warning
+import akka.event.EventStream
+import scala.concurrent.duration.Duration
+import akka.ConfigurationException
+import akka.actor.Deploy
 
 /**
- * Scala API. Dispatcher factory.
- * <p/>
- * Example usage:
- * <pre/>
- *   val dispatcher = Dispatchers.newDispatcher("name")
- *   dispatcher
- *     .withNewThreadPoolWithLinkedBlockingQueueWithCapacity(100)
- *     .setCorePoolSize(16)
- *     .setMaxPoolSize(128)
- *     .setKeepAliveTimeInMillis(60000)
- *     .setRejectionPolicy(new CallerRunsPolicy)
- *     .build
- * </pre>
- * <p/>
- * Java API. Dispatcher factory.
- * <p/>
- * Example usage:
- * <pre/>
- *   MessageDispatcher dispatcher = Dispatchers.newDispatcher("name");
- *   dispatcher
- *     .withNewThreadPoolWithLinkedBlockingQueueWithCapacity(100)
- *     .setCorePoolSize(16)
- *     .setMaxPoolSize(128)
- *     .setKeepAliveTimeInMillis(60000)
- *     .setRejectionPolicy(new CallerRunsPolicy())
- *     .build();
- * </pre>
- * <p/>
- *
- * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
+ * DispatcherPrerequisites represents useful contextual pieces when constructing a MessageDispatcher
  */
+trait DispatcherPrerequisites {
+  def threadFactory: ThreadFactory
+  def eventStream: EventStream
+  def scheduler: Scheduler
+  def dynamicAccess: DynamicAccess
+  def settings: ActorSystem.Settings
+  def mailboxes: Mailboxes
+}
+
+/**
+ * INTERNAL API
+ */
+private[akka] case class DefaultDispatcherPrerequisites(
+  val threadFactory: ThreadFactory,
+  val eventStream: EventStream,
+  val scheduler: Scheduler,
+  val dynamicAccess: DynamicAccess,
+  val settings: ActorSystem.Settings,
+  val mailboxes: Mailboxes) extends DispatcherPrerequisites
+
 object Dispatchers {
-  val THROUGHPUT = config.getInt("akka.actor.throughput", 5)
-  val DEFAULT_SHUTDOWN_TIMEOUT = config.getLong("akka.actor.dispatcher-shutdown-timeout").
-    map(time ⇒ Duration(time, TIME_UNIT)).
-    getOrElse(Duration(1000, TimeUnit.MILLISECONDS))
-  val MAILBOX_CAPACITY = config.getInt("akka.actor.default-dispatcher.mailbox-capacity", -1)
-  val MAILBOX_PUSH_TIME_OUT = Duration(config.getInt("akka.actor.default-dispatcher.mailbox-push-timeout-time", 10), TIME_UNIT)
-  val THROUGHPUT_DEADLINE_TIME = Duration(config.getInt("akka.actor.throughput-deadline-time", -1), TIME_UNIT)
-  val THROUGHPUT_DEADLINE_TIME_MILLIS = THROUGHPUT_DEADLINE_TIME.toMillis.toInt
-  val MAILBOX_TYPE: MailboxType = if (MAILBOX_CAPACITY < 1) UnboundedMailbox() else BoundedMailbox()
+  /**
+   * The id of the default dispatcher, also the full key of the
+   * configuration of the default dispatcher.
+   */
+  final val DefaultDispatcherId = "akka.actor.default-dispatcher"
+}
 
-  lazy val defaultGlobalDispatcher = {
-    config.getSection("akka.actor.default-dispatcher").flatMap(from).getOrElse(globalDispatcher)
-  }
+/**
+ * Dispatchers are to be defined in configuration to allow for tuning
+ * for different environments. Use the `lookup` method to create
+ * a dispatcher as specified in configuration.
+ *
+ * Look in `akka.actor.default-dispatcher` section of the reference.conf
+ * for documentation of dispatcher options.
+ */
+class Dispatchers(val settings: ActorSystem.Settings, val prerequisites: DispatcherPrerequisites) {
 
-  object globalDispatcher extends Dispatcher("global", THROUGHPUT, THROUGHPUT_DEADLINE_TIME_MILLIS, MAILBOX_TYPE)
+  import Dispatchers._
+
+  val cachingConfig = new CachingConfig(settings.config)
+
+  val defaultDispatcherConfig: Config =
+    idConfig(DefaultDispatcherId).withFallback(settings.config.getConfig(DefaultDispatcherId))
 
   /**
-   * Creates an thread based dispatcher serving a single actor through the same single thread.
-   * Uses the default timeout
-   * <p/>
-   * E.g. each actor consumes its own thread.
+   * The one and only default dispatcher.
    */
-  def newPinnedDispatcher(actor: ActorRef) = actor match {
-    case null ⇒ new PinnedDispatcher()
-    case some ⇒ new PinnedDispatcher(some)
-  }
+  def defaultGlobalDispatcher: MessageDispatcher = lookup(DefaultDispatcherId)
+
+  private val dispatcherConfigurators = new ConcurrentHashMap[String, MessageDispatcherConfigurator]
 
   /**
-   * Creates an thread based dispatcher serving a single actor through the same single thread.
-   * If capacity is negative, it's Integer.MAX_VALUE
-   * <p/>
-   * E.g. each actor consumes its own thread.
-   */
-  def newPinnedDispatcher(actor: ActorRef, mailboxType: MailboxType) = actor match {
-    case null ⇒ new PinnedDispatcher(mailboxType)
-    case some ⇒ new PinnedDispatcher(some, mailboxType)
-  }
-
-  /**
-   * Creates an thread based dispatcher serving a single actor through the same single thread.
-   * <p/>
-   * E.g. each actor consumes its own thread.
-   */
-  def newPinnedDispatcher(name: String, mailboxType: MailboxType) =
-    new PinnedDispatcher(name, mailboxType)
-
-  /**
-   * Creates an thread based dispatcher serving a single actor through the same single thread.
-   * <p/>
-   * E.g. each actor consumes its own thread.
-   */
-  def newPinnedDispatcher(name: String) =
-    new PinnedDispatcher(name)
-
-  /**
-   * Creates a executor-based event-driven dispatcher serving multiple (millions) of actors through a thread pool.
-   * <p/>
-   * Has a fluent builder interface for configuring its semantics.
-   */
-  def newDispatcher(name: String) =
-    ThreadPoolConfigDispatcherBuilder(config ⇒ new Dispatcher(name, config), ThreadPoolConfig())
-
-  /**
-   * Creates a executor-based event-driven dispatcher serving multiple (millions) of actors through a thread pool.
-   * <p/>
-   * Has a fluent builder interface for configuring its semantics.
-   */
-  def newDispatcher(name: String, throughput: Int, mailboxType: MailboxType) =
-    ThreadPoolConfigDispatcherBuilder(config ⇒
-      new Dispatcher(name, throughput, THROUGHPUT_DEADLINE_TIME_MILLIS, mailboxType, config), ThreadPoolConfig())
-
-  /**
-   * Creates a executor-based event-driven dispatcher serving multiple (millions) of actors through a thread pool.
-   * <p/>
-   * Has a fluent builder interface for configuring its semantics.
-   */
-  def newDispatcher(name: String, throughput: Int, throughputDeadlineMs: Int, mailboxType: MailboxType) =
-    ThreadPoolConfigDispatcherBuilder(config ⇒
-      new Dispatcher(name, throughput, throughputDeadlineMs, mailboxType, config), ThreadPoolConfig())
-
-  /**
-   * Creates a executor-based event-driven dispatcher, with work-stealing, serving multiple (millions) of actors through a thread pool.
-   * <p/>
-   * Has a fluent builder interface for configuring its semantics.
-   */
-  def newBalancingDispatcher(name: String) =
-    ThreadPoolConfigDispatcherBuilder(config ⇒ new BalancingDispatcher(name, config), ThreadPoolConfig())
-
-  /**
-   * Creates a executor-based event-driven dispatcher, with work-stealing, serving multiple (millions) of actors through a thread pool.
-   * <p/>
-   * Has a fluent builder interface for configuring its semantics.
-   */
-  def newBalancingDispatcher(name: String, throughput: Int) =
-    ThreadPoolConfigDispatcherBuilder(config ⇒
-      new BalancingDispatcher(name, throughput, THROUGHPUT_DEADLINE_TIME_MILLIS, MAILBOX_TYPE, config), ThreadPoolConfig())
-
-  /**
-   * Creates a executor-based event-driven dispatcher, with work-stealing, serving multiple (millions) of actors through a thread pool.
-   * <p/>
-   * Has a fluent builder interface for configuring its semantics.
-   */
-  def newBalancingDispatcher(name: String, throughput: Int, mailboxType: MailboxType) =
-    ThreadPoolConfigDispatcherBuilder(config ⇒
-      new BalancingDispatcher(name, throughput, THROUGHPUT_DEADLINE_TIME_MILLIS, mailboxType, config), ThreadPoolConfig())
-
-  /**
-   * Creates a executor-based event-driven dispatcher, with work-stealing, serving multiple (millions) of actors through a thread pool.
-   * <p/>
-   * Has a fluent builder interface for configuring its semantics.
-   */
-  def newBalancingDispatcher(name: String, throughput: Int, throughputDeadlineMs: Int, mailboxType: MailboxType) =
-    ThreadPoolConfigDispatcherBuilder(config ⇒
-      new BalancingDispatcher(name, throughput, throughputDeadlineMs, mailboxType, config), ThreadPoolConfig())
-  /**
-   * Utility function that tries to load the specified dispatcher config from the akka.conf
-   * or else use the supplied default dispatcher
-   */
-  def fromConfig(key: String, default: ⇒ MessageDispatcher = defaultGlobalDispatcher): MessageDispatcher =
-    config getSection key flatMap from getOrElse default
-
-  /*
-   * Creates of obtains a dispatcher from a ConfigMap according to the format below
+   * Returns a dispatcher as specified in configuration. Please note that this
+   * method _may_ create and return a NEW dispatcher, _every_ call.
    *
-   * default-dispatcher {
-   *   type = "GlobalExecutorBasedEventDriven" # Must be one of the following, all "Global*" are non-configurable
-   *                               # (ExecutorBasedEventDrivenWorkStealing), ExecutorBasedEventDriven,
-   *                               # GlobalExecutorBasedEventDriven
-   *                               # A FQCN to a class inheriting MessageDispatcherConfigurator with a no-arg visible constructor
-   *   keep-alive-time = 60        # Keep alive time for threads
-   *   core-pool-size-factor = 1.0 # No of core threads ... ceil(available processors * factor)
-   *   max-pool-size-factor  = 4.0 # Max no of threads ... ceil(available processors * factor)
-   *   executor-bounds = -1        # Makes the Executor bounded, -1 is unbounded
-   *   allow-core-timeout = on     # Allow core threads to time out
-   *   rejection-policy = "caller-runs" # abort, caller-runs, discard-oldest, discard
-   *   throughput = 5              # Throughput for Dispatcher
-   * }
-   * ex: from(config.getConfigMap(identifier).get)
-   *
-   * Gotcha: Only configures the dispatcher if possible
-   * Returns: None if "type" isn't specified in the config
-   * Throws: IllegalArgumentException if the value of "type" is not valid
-   *         IllegalArgumentException if it cannot
+   * @throws ConfigurationException if the specified dispatcher cannot be found in the configuration
    */
-  def from(cfg: Configuration): Option[MessageDispatcher] = {
-    cfg.getString("type") map {
-      case "Dispatcher"          ⇒ new DispatcherConfigurator()
-      case "BalancingDispatcher" ⇒ new BalancingDispatcherConfigurator()
-      case "GlobalDispatcher"    ⇒ GlobalDispatcherConfigurator
-      case fqn ⇒
-        ReflectiveAccess.getClassFor[MessageDispatcherConfigurator](fqn) match {
-          case Right(clazz) ⇒
-            ReflectiveAccess.createInstance[MessageDispatcherConfigurator](clazz, Array[Class[_]](), Array[AnyRef]()) match {
-              case Right(configurator) ⇒ configurator
-              case Left(exception) ⇒
-                throw new IllegalArgumentException(
-                  "Cannot instantiate MessageDispatcherConfigurator type [%s], make sure it has a default no-args constructor" format fqn, exception)
-            }
-          case Left(exception) ⇒
-            throw new IllegalArgumentException("Unknown MessageDispatcherConfigurator type [%s]" format fqn, exception)
+  def lookup(id: String): MessageDispatcher = lookupConfigurator(id).dispatcher()
+
+  /**
+   * Checks that the configuration provides a section for the given dispatcher.
+   * This does not guarantee that no ConfigurationException will be thrown when
+   * using this dispatcher, because the details can only be checked by trying
+   * to instantiate it, which might be undesirable when just checking.
+   */
+  def hasDispatcher(id: String): Boolean = cachingConfig.hasPath(id)
+
+  private def lookupConfigurator(id: String): MessageDispatcherConfigurator = {
+    dispatcherConfigurators.get(id) match {
+      case null ⇒
+        // It doesn't matter if we create a dispatcher configurator that isn't used due to concurrent lookup.
+        // That shouldn't happen often and in case it does the actual ExecutorService isn't
+        // created until used, i.e. cheap.
+        val newConfigurator =
+          if (cachingConfig.hasPath(id)) configuratorFrom(config(id))
+          else throw new ConfigurationException(s"Dispatcher [$id] not configured")
+
+        dispatcherConfigurators.putIfAbsent(id, newConfigurator) match {
+          case null     ⇒ newConfigurator
+          case existing ⇒ existing
         }
-    } map {
-      _ configure cfg
+
+      case existing ⇒ existing
+    }
+  }
+
+  //INTERNAL API
+  private[akka] def config(id: String): Config = {
+    import scala.collection.JavaConverters._
+    def simpleName = id.substring(id.lastIndexOf('.') + 1)
+    idConfig(id)
+      .withFallback(settings.config.getConfig(id))
+      .withFallback(ConfigFactory.parseMap(Map("name" -> simpleName).asJava))
+      .withFallback(defaultDispatcherConfig)
+  }
+
+  //INTERNAL API
+  private def idConfig(id: String): Config = {
+    import scala.collection.JavaConverters._
+    ConfigFactory.parseMap(Map("id" -> id).asJava)
+  }
+
+  /**
+   * INTERNAL API
+   *
+   * Creates a dispatcher from a Config. Internal test purpose only.
+   *
+   * ex: from(config.getConfig(id))
+   *
+   * The Config must also contain a `id` property, which is the identifier of the dispatcher.
+   *
+   * Throws: IllegalArgumentException if the value of "type" is not valid
+   *         IllegalArgumentException if it cannot create the MessageDispatcherConfigurator
+   */
+  private[akka] def from(cfg: Config): MessageDispatcher = configuratorFrom(cfg).dispatcher()
+
+  private[akka] def isBalancingDispatcher(id: String): Boolean = settings.config.hasPath(id) && config(id).getString("type") == "BalancingDispatcher"
+
+  /**
+   * INTERNAL API
+   *
+   * Creates a MessageDispatcherConfigurator from a Config.
+   *
+   * The Config must also contain a `id` property, which is the identifier of the dispatcher.
+   *
+   * Throws: IllegalArgumentException if the value of "type" is not valid
+   *         IllegalArgumentException if it cannot create the MessageDispatcherConfigurator
+   */
+  private def configuratorFrom(cfg: Config): MessageDispatcherConfigurator = {
+    if (!cfg.hasPath("id")) throw new ConfigurationException("Missing dispatcher 'id' property in config: " + cfg.root.render)
+
+    cfg.getString("type") match {
+      case "Dispatcher"          ⇒ new DispatcherConfigurator(cfg, prerequisites)
+      case "BalancingDispatcher" ⇒ new BalancingDispatcherConfigurator(cfg, prerequisites)
+      case "PinnedDispatcher"    ⇒ new PinnedDispatcherConfigurator(cfg, prerequisites)
+      case fqn ⇒
+        val args = List(classOf[Config] -> cfg, classOf[DispatcherPrerequisites] -> prerequisites)
+        prerequisites.dynamicAccess.createInstanceFor[MessageDispatcherConfigurator](fqn, args).recover({
+          case exception ⇒
+            throw new ConfigurationException(
+              ("Cannot instantiate MessageDispatcherConfigurator type [%s], defined in [%s], " +
+                "make sure it has constructor with [com.typesafe.config.Config] and " +
+                "[akka.dispatch.DispatcherPrerequisites] parameters")
+                .format(fqn, cfg.getString("id")), exception)
+        }).get
     }
   }
 }
 
-object GlobalDispatcherConfigurator extends MessageDispatcherConfigurator {
-  def configure(config: Configuration): MessageDispatcher = Dispatchers.globalDispatcher
+/**
+ * Configurator for creating [[akka.dispatch.Dispatcher]].
+ * Returns the same dispatcher instance for for each invocation
+ * of the `dispatcher()` method.
+ */
+class DispatcherConfigurator(config: Config, prerequisites: DispatcherPrerequisites)
+  extends MessageDispatcherConfigurator(config, prerequisites) {
+
+  private val instance = new Dispatcher(
+    this,
+    config.getString("id"),
+    config.getInt("throughput"),
+    Duration(config.getNanoseconds("throughput-deadline-time"), TimeUnit.NANOSECONDS),
+    configureExecutor(),
+    Duration(config.getMilliseconds("shutdown-timeout"), TimeUnit.MILLISECONDS))
+
+  /**
+   * Returns the same dispatcher instance for each invocation
+   */
+  override def dispatcher(): MessageDispatcher = instance
 }
 
-class DispatcherConfigurator extends MessageDispatcherConfigurator {
-  def configure(config: Configuration): MessageDispatcher = {
-    configureThreadPool(config, threadPoolConfig ⇒ new Dispatcher(
-      config.getString("name", newUuid.toString),
-      config.getInt("throughput", Dispatchers.THROUGHPUT),
-      config.getInt("throughput-deadline-time", Dispatchers.THROUGHPUT_DEADLINE_TIME_MILLIS),
-      mailboxType(config),
-      threadPoolConfig)).build
-  }
+/**
+ * INTERNAL API
+ */
+private[akka] object BalancingDispatcherConfigurator {
+  private val defaultRequirement =
+    ConfigFactory.parseString("mailbox-requirement = akka.dispatch.MultipleConsumerSemantics")
+  def amendConfig(config: Config): Config =
+    if (config.getString("mailbox-requirement") != Mailboxes.NoMailboxRequirement) config
+    else defaultRequirement.withFallback(config)
 }
 
-class BalancingDispatcherConfigurator extends MessageDispatcherConfigurator {
-  def configure(config: Configuration): MessageDispatcher = {
-    configureThreadPool(config, threadPoolConfig ⇒ new BalancingDispatcher(
-      config.getString("name", newUuid.toString),
-      config.getInt("throughput", Dispatchers.THROUGHPUT),
-      config.getInt("throughput-deadline-time", Dispatchers.THROUGHPUT_DEADLINE_TIME_MILLIS),
-      mailboxType(config),
-      threadPoolConfig)).build
+/**
+ * Configurator for creating [[akka.dispatch.BalancingDispatcher]].
+ * Returns the same dispatcher instance for for each invocation
+ * of the `dispatcher()` method.
+ */
+class BalancingDispatcherConfigurator(_config: Config, _prerequisites: DispatcherPrerequisites)
+  extends MessageDispatcherConfigurator(BalancingDispatcherConfigurator.amendConfig(_config), _prerequisites) {
+
+  private val instance = {
+    val mailboxes = prerequisites.mailboxes
+    val id = config.getString("id")
+    val requirement = mailboxes.getMailboxRequirement(config)
+    if (!classOf[MultipleConsumerSemantics].isAssignableFrom(requirement))
+      throw new IllegalArgumentException(
+        "BalancingDispatcher must have 'mailbox-requirement' which implements akka.dispatch.MultipleConsumerSemantics; " +
+          s"dispatcher [$id] has [$requirement]")
+    val mailboxType =
+      if (config.hasPath("mailbox-type")) {
+        val mt = mailboxes.lookup(id)
+        if (!requirement.isAssignableFrom(mailboxes.getProducedMessageQueueType(mt)))
+          throw new IllegalArgumentException(
+            s"BalancingDispatcher [$id] has 'mailbox-type' [${mt.getClass}] which is incompatible with 'mailbox-requirement' [$requirement]")
+        mt
+      } else mailboxes.lookupByQueueType(requirement)
+    create(mailboxType)
   }
+
+  protected def create(mailboxType: MailboxType): BalancingDispatcher =
+    new BalancingDispatcher(
+      this,
+      config.getString("id"),
+      config.getInt("throughput"),
+      Duration(config.getNanoseconds("throughput-deadline-time"), TimeUnit.NANOSECONDS),
+      mailboxType,
+      configureExecutor(),
+      Duration(config.getMilliseconds("shutdown-timeout"), TimeUnit.MILLISECONDS),
+      config.getBoolean("attempt-teamwork"))
+
+  /**
+   * Returns the same dispatcher instance for each invocation
+   */
+  override def dispatcher(): MessageDispatcher = instance
+}
+
+/**
+ * Configurator for creating [[akka.dispatch.PinnedDispatcher]].
+ * Returns new dispatcher instance for for each invocation
+ * of the `dispatcher()` method.
+ */
+class PinnedDispatcherConfigurator(config: Config, prerequisites: DispatcherPrerequisites)
+  extends MessageDispatcherConfigurator(config, prerequisites) {
+
+  private val threadPoolConfig: ThreadPoolConfig = configureExecutor() match {
+    case e: ThreadPoolExecutorConfigurator ⇒ e.threadPoolConfig
+    case other ⇒
+      prerequisites.eventStream.publish(
+        Warning("PinnedDispatcherConfigurator",
+          this.getClass,
+          "PinnedDispatcher [%s] not configured to use ThreadPoolExecutor, falling back to default config.".format(
+            config.getString("id"))))
+      ThreadPoolConfig()
+  }
+  /**
+   * Creates new dispatcher for each invocation.
+   */
+  override def dispatcher(): MessageDispatcher =
+    new PinnedDispatcher(
+      this, null, config.getString("id"),
+      Duration(config.getMilliseconds("shutdown-timeout"), TimeUnit.MILLISECONDS), threadPoolConfig)
+
 }

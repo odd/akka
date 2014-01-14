@@ -11,19 +11,21 @@ import java.io.ObjectOutputStream
 import java.io.PrintWriter
 import java.text.SimpleDateFormat
 import java.util.Date
-
 import scala.collection.mutable.{ Map ⇒ MutableMap }
-
-import akka.event.EventHandler
+import scala.collection.immutable
+import akka.actor.ActorSystem
+import akka.event.Logging
 
 trait BenchResultRepository {
   def add(stats: Stats)
 
-  def get(name: String): Seq[Stats]
+  def get(name: String): immutable.Seq[Stats]
 
   def get(name: String, load: Int): Option[Stats]
 
-  def getWithHistorical(name: String, load: Int): Seq[Stats]
+  def getWithHistorical(name: String, load: Int): immutable.Seq[Stats]
+
+  def isBaseline(stats: Stats): Boolean
 
   def saveHtmlReport(content: String, name: String): Unit
 
@@ -37,38 +39,44 @@ object BenchResultRepository {
 }
 
 class FileBenchResultRepository extends BenchResultRepository {
-  private val statsByName = MutableMap[String, Seq[Stats]]()
+  private val statsByName = MutableMap[String, immutable.Seq[Stats]]()
   private val baselineStats = MutableMap[Key, Stats]()
-  private val historicalStats = MutableMap[Key, Seq[Stats]]()
-  private val serDir = System.getProperty("benchmark.resultDir", "target/benchmark") + "/ser"
+  private val historicalStats = MutableMap[Key, immutable.Seq[Stats]]()
+  private def resultDir = BenchmarkConfig.config.getString("benchmark.resultDir")
+  private val serDir = resultDir + "/ser"
   private def serDirExists: Boolean = new File(serDir).exists
-  private val htmlDir = System.getProperty("benchmark.resultDir", "target/benchmark") + "/html"
+  private val htmlDir = resultDir + "/html"
   private def htmlDirExists: Boolean = new File(htmlDir).exists
   protected val maxHistorical = 7
 
   case class Key(name: String, load: Int)
 
-  def add(stats: Stats) {
-    val values = statsByName.getOrElseUpdate(stats.name, IndexedSeq.empty)
+  def add(stats: Stats): Unit = synchronized {
+    val values = statsByName.getOrElseUpdate(stats.name, Vector.empty)
     statsByName(stats.name) = values :+ stats
     save(stats)
   }
 
-  def get(name: String): Seq[Stats] = {
-    statsByName.getOrElse(name, IndexedSeq.empty)
+  def get(name: String): immutable.Seq[Stats] = synchronized {
+    statsByName.getOrElse(name, Vector.empty)
   }
 
-  def get(name: String, load: Int): Option[Stats] = {
+  def get(name: String, load: Int): Option[Stats] = synchronized {
     get(name).find(_.load == load)
   }
 
-  def getWithHistorical(name: String, load: Int): Seq[Stats] = {
+  def isBaseline(stats: Stats): Boolean = synchronized {
+    baselineStats.get(Key(stats.name, stats.load)) == Some(stats)
+  }
+
+  def getWithHistorical(name: String, load: Int): immutable.Seq[Stats] = synchronized {
     val key = Key(name, load)
-    val historical = historicalStats.getOrElse(key, IndexedSeq.empty)
+    val historical = historicalStats.getOrElse(key, Vector.empty)
     val baseline = baselineStats.get(key)
     val current = get(name, load)
 
-    (IndexedSeq.empty ++ historical ++ baseline ++ current).takeRight(maxHistorical)
+    val limited = (Vector.empty ++ historical ++ baseline ++ current).takeRight(maxHistorical)
+    limited.sortBy(_.timestamp)
   }
 
   private def loadFiles() {
@@ -87,7 +95,7 @@ class FileBenchResultRepository extends BenchResultRepository {
       }
       val historical = load(historicalFiles)
       for (h ← historical) {
-        val values = historicalStats.getOrElseUpdate(Key(h.name, h.load), IndexedSeq.empty)
+        val values = historicalStats.getOrElseUpdate(Key(h.name, h.load), Vector.empty)
         historicalStats(Key(h.name, h.load)) = values :+ h
       }
     }
@@ -95,24 +103,25 @@ class FileBenchResultRepository extends BenchResultRepository {
 
   private def save(stats: Stats) {
     new File(serDir).mkdirs
-    if (!serDirExists) return
-    val timestamp = new SimpleDateFormat("yyyyMMddHHmmss").format(new Date(stats.timestamp))
-    val name = stats.name + "--" + timestamp + "--" + stats.load + ".ser"
-    val f = new File(serDir, name)
-    var out: ObjectOutputStream = null
-    try {
-      out = new ObjectOutputStream(new BufferedOutputStream(new FileOutputStream(f)))
-      out.writeObject(stats)
-    } catch {
-      case e: Exception ⇒
-        EventHandler.error(this, "Failed to save [%s] to [%s], due to [%s]".
-          format(stats, f.getAbsolutePath, e.getMessage))
-    } finally {
-      if (out ne null) try { out.close() } catch { case ignore: Exception ⇒ }
+    if (serDirExists) {
+      val timestamp = new SimpleDateFormat("yyyyMMddHHmmss").format(new Date(stats.timestamp))
+      val name = stats.name + "--" + timestamp + "--" + stats.load + ".ser"
+      val f = new File(serDir, name)
+      var out: ObjectOutputStream = null
+      try {
+        out = new ObjectOutputStream(new BufferedOutputStream(new FileOutputStream(f)))
+        out.writeObject(stats)
+      } catch {
+        case e: Exception ⇒
+          val errMsg = "Failed to save [%s] to [%s], due to [%s]".format(stats, f.getAbsolutePath, e.getMessage)
+          throw new RuntimeException(errMsg)
+      } finally {
+        if (out ne null) try { out.close() } catch { case ignore: Exception ⇒ }
+      }
     }
   }
 
-  private def load(files: Iterable[File]): Seq[Stats] = {
+  private def load(files: Iterable[File]): immutable.Seq[Stats] = {
     val result =
       for (f ← files) yield {
         var in: ObjectInputStream = null
@@ -122,34 +131,33 @@ class FileBenchResultRepository extends BenchResultRepository {
           Some(stats)
         } catch {
           case e: Throwable ⇒
-            EventHandler.error(this, "Failed to load from [%s], due to [%s]".
-              format(f.getAbsolutePath, e.getMessage))
             None
         } finally {
-          if (in ne null) try { in.close() } catch { case ignore: Exception ⇒ }
+          if (in ne null) try in.close() catch { case ignore: Exception ⇒ }
         }
       }
 
-    result.flatten.toSeq.sortBy(_.timestamp)
+    result.flatten.toVector.sortBy(_.timestamp)
   }
 
   loadFiles()
 
   def saveHtmlReport(content: String, fileName: String) {
     new File(htmlDir).mkdirs
-    if (!htmlDirExists) return
-    val f = new File(htmlDir, fileName)
-    var writer: PrintWriter = null
-    try {
-      writer = new PrintWriter(new FileWriter(f))
-      writer.print(content)
-      writer.flush()
-    } catch {
-      case e: Exception ⇒
-        EventHandler.error(this, "Failed to save report to [%s], due to [%s]".
-          format(f.getAbsolutePath, e.getMessage))
-    } finally {
-      if (writer ne null) try { writer.close() } catch { case ignore: Exception ⇒ }
+    if (htmlDirExists) {
+      val f = new File(htmlDir, fileName)
+      var writer: PrintWriter = null
+      try {
+        writer = new PrintWriter(new FileWriter(f))
+        writer.print(content)
+        writer.flush()
+      } catch {
+        case e: Exception ⇒
+          val errMsg = "Failed to save report to [%s], due to [%s]".format(f.getAbsolutePath, e.getMessage)
+          throw new RuntimeException(errMsg)
+      } finally {
+        if (writer ne null) try { writer.close() } catch { case ignore: Exception ⇒ }
+      }
     }
   }
 

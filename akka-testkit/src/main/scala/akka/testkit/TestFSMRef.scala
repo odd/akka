@@ -1,13 +1,15 @@
 /**
- * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.testkit
 
 import akka.actor._
-import akka.util._
-
-import com.eaio.uuid.UUID
+import scala.concurrent.duration.Duration
+import akka.dispatch.DispatcherPrerequisites
+import scala.concurrent.duration.FiniteDuration
+import akka.dispatch.MessageDispatcher
+import akka.dispatch.MailboxType
 
 /**
  * This is a specialised form of the TestActorRef with support for querying and
@@ -31,12 +33,16 @@ import com.eaio.uuid.UUID
  * assert (fsm.underlyingActor.getLog == IndexedSeq(FSMLogEntry(1, null, "hallo")))
  * </code></pre>
  *
- * @author Roland Kuhn
  * @since 1.2
  */
-class TestFSMRef[S, D, T <: Actor](factory: () ⇒ T, address: String)(implicit ev: T <:< FSM[S, D]) extends TestActorRef(factory, address) {
+class TestFSMRef[S, D, T <: Actor](
+  system: ActorSystem,
+  props: Props,
+  supervisor: ActorRef,
+  name: String)(implicit ev: T <:< FSM[S, D])
+  extends TestActorRef[T](system, props, supervisor, name) {
 
-  private def fsm = underlyingActor
+  private def fsm: T = underlyingActor
 
   /**
    * Get current state name of this FSM.
@@ -54,33 +60,42 @@ class TestFSMRef[S, D, T <: Actor](factory: () ⇒ T, address: String)(implicit 
    * corresponding transition initiated from within the FSM, including timeout
    * and stop handling.
    */
-  def setState(stateName: S = fsm.stateName, stateData: D = fsm.stateData, timeout: Option[Duration] = None, stopReason: Option[FSM.Reason] = None) {
-    fsm.applyState(FSM.State(stateName, stateData, timeout, stopReason))
+  def setState(stateName: S = fsm.stateName, stateData: D = fsm.stateData, timeout: FiniteDuration = null, stopReason: Option[FSM.Reason] = None) {
+    fsm.applyState(FSM.State(stateName, stateData, Option(timeout), stopReason))
   }
 
   /**
-   * Proxy for FSM.setTimer.
+   * Proxy for [[FSM#setTimer]].
    */
-  def setTimer(name: String, msg: Any, timeout: Duration, repeat: Boolean) {
+  def setTimer(name: String, msg: Any, timeout: FiniteDuration, repeat: Boolean) {
     fsm.setTimer(name, msg, timeout, repeat)
   }
 
   /**
-   * Proxy for FSM.cancelTimer.
+   * Proxy for [[FSM#cancelTimer]].
    */
   def cancelTimer(name: String) { fsm.cancelTimer(name) }
 
   /**
-   * Proxy for FSM.timerActive_?.
+   * Proxy for [[FSM#isStateTimerActive]].
    */
-  def timerActive_?(name: String) = fsm.timerActive_?(name)
+  def isTimerActive(name: String) = fsm.isTimerActive(name)
 
+  /**
+   * Proxy for [[FSM#isStateTimerActive]].
+   */
+  def isStateTimerActive = fsm.isStateTimerActive
 }
 
 object TestFSMRef {
 
-  def apply[S, D, T <: Actor](factory: ⇒ T)(implicit ev: T <:< FSM[S, D]): TestFSMRef[S, D, T] = new TestFSMRef(() ⇒ factory, new UUID().toString)
+  def apply[S, D, T <: Actor](factory: ⇒ T)(implicit ev: T <:< FSM[S, D], system: ActorSystem): TestFSMRef[S, D, T] = {
+    val impl = system.asInstanceOf[ActorSystemImpl] //TODO ticket #1559
+    new TestFSMRef(impl, Props(creator = () ⇒ factory), impl.guardian.asInstanceOf[InternalActorRef], TestActorRef.randomName)
+  }
 
-  def apply[S, D, T <: Actor](factory: ⇒ T, address: String)(implicit ev: T <:< FSM[S, D]): TestFSMRef[S, D, T] = new TestFSMRef(() ⇒ factory, address)
-
+  def apply[S, D, T <: Actor](factory: ⇒ T, name: String)(implicit ev: T <:< FSM[S, D], system: ActorSystem): TestFSMRef[S, D, T] = {
+    val impl = system.asInstanceOf[ActorSystemImpl] //TODO ticket #1559
+    new TestFSMRef(impl, Props(creator = () ⇒ factory), impl.guardian.asInstanceOf[InternalActorRef], name)
+  }
 }

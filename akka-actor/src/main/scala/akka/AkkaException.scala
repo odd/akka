@@ -1,46 +1,38 @@
 /**
- * Copyright (C) 2009-2011 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka
-
-import akka.actor.newUuid
-import java.net.{ InetAddress, UnknownHostException }
 
 /**
  * Akka base Exception. Each Exception gets:
  * <ul>
  *   <li>a uuid for tracking purposes</li>
  *   <li>toString that includes exception name, message and uuid</li>
- *   <li>toLongString which also includes the stack trace</li>
  * </ul>
- *
- * @author <a href="http://jonasboner.com">Jonas Bon&#233;r</a>
  */
-class AkkaException(message: String = "", cause: Throwable = null) extends RuntimeException(message, cause) with Serializable {
-  val uuid = "%s_%s".format(AkkaException.hostname, newUuid)
+@SerialVersionUID(1L)
+class AkkaException(message: String, cause: Throwable) extends RuntimeException(message, cause) with Serializable {
+  def this(msg: String) = this(msg, null)
+}
 
-  override lazy val toString =
-    "%s: %s\n[%s]".format(getClass.getName, message, uuid)
-
-  lazy val toLongString =
-    "%s: %s\n[%s]\n%s".format(getClass.getName, message, uuid, stackTraceToString)
-
-  def this(msg: String) = this(msg, null);
-
-  def stackTraceToString = {
-    val trace = getStackTrace
-    val sb = new StringBuffer
-    for (i ← 0 until trace.length)
-      sb.append("\tat %s\n" format trace(i))
-    sb.toString
+/**
+ * Mix in this trait to suppress the StackTrace for the instance of the exception but not the cause,
+ * scala.util.control.NoStackTrace suppresses all the StackTraces.
+ */
+trait OnlyCauseStackTrace { self: Throwable ⇒
+  override def fillInStackTrace(): Throwable = {
+    setStackTrace(getCause match {
+      case null ⇒ Array.empty
+      case some ⇒ some.getStackTrace
+    })
+    this
   }
 }
 
-object AkkaException {
-  val hostname = try {
-    InetAddress.getLocalHost.getHostName
-  } catch {
-    case e: UnknownHostException ⇒ "unknown"
-  }
+/**
+ * This exception is thrown when Akka detects a problem with the provided configuration
+ */
+class ConfigurationException(message: String, cause: Throwable) extends AkkaException(message, cause) {
+  def this(msg: String) = this(msg, null)
 }
