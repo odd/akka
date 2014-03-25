@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote.testconductor
 
@@ -45,7 +45,7 @@ class TestConductorSpec extends MultiNodeSpec(TestConductorMultiJvmSpec) with ST
       runOn(master) {
         system.actorOf(Props(new Actor {
           def receive = {
-            case x ⇒ testActor ! x; sender ! x
+            case x ⇒ testActor ! x; sender() ! x
           }
         }).withDeploy(Deploy.local), "echo")
       }

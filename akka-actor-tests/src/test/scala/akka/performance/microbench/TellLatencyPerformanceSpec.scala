@@ -83,7 +83,7 @@ object TellLatencyPerformanceSpec {
   val random: Random = new Random(0)
 
   case object Run
-  case class Msg(nanoTime: Long = System.nanoTime)
+  final case class Msg(nanoTime: Long = System.nanoTime)
 
   class Waypoint(next: ActorRef) extends Actor {
     def receive = {
@@ -93,7 +93,7 @@ object TellLatencyPerformanceSpec {
 
   class Destination extends Actor {
     def receive = {
-      case msg: Msg ⇒ sender ! msg
+      case msg: Msg ⇒ sender() ! msg
     }
   }
 

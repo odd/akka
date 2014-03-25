@@ -1,6 +1,3 @@
-/**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
- */
 package sample.hello
 
 import akka.actor.Actor
@@ -14,6 +11,6 @@ class Greeter extends Actor {
   def receive = {
     case Greeter.Greet =>
       println("Hello World!")
-      sender ! Greeter.Done
+      sender() ! Greeter.Done
   }
 }

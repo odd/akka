@@ -11,7 +11,7 @@ import akka.camel.internal.ActivationProtocol._
 
 class ActivationTrackerTest extends TestKit(ActorSystem("test")) with WordSpecLike with Matchers with BeforeAndAfterAll with BeforeAndAfterEach with GivenWhenThen {
 
-  override protected def afterAll() { shutdown(system) }
+  override protected def afterAll() { shutdown() }
 
   var actor: TestProbe = _
   var awaiting: Awaiting = _
@@ -27,7 +27,7 @@ class ActivationTrackerTest extends TestKit(ActorSystem("test")) with WordSpecLi
   val at = system.actorOf(Props[ActivationTracker], name = "activationTrackker")
   "ActivationTracker" must {
     def publish(msg: Any) = at ! msg
-    implicit def timeout = remaining
+    implicit def timeout = remainingOrDefault
     "forwards activation message to all awaiting parties" taggedAs TimingTest in {
       awaiting.awaitActivation()
       anotherAwaiting.awaitActivation()

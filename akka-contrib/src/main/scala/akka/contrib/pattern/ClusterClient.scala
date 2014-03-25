@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.contrib.pattern
 
@@ -63,16 +63,16 @@ object ClusterClient {
   }
 
   @SerialVersionUID(1L)
-  case class Send(path: String, msg: Any, localAffinity: Boolean) {
+  final case class Send(path: String, msg: Any, localAffinity: Boolean) {
     /**
      * Convenience constructor with `localAffinity` false
      */
     def this(path: String, msg: Any) = this(path, msg, localAffinity = false)
   }
   @SerialVersionUID(1L)
-  case class SendToAll(path: String, msg: Any)
+  final case class SendToAll(path: String, msg: Any)
   @SerialVersionUID(1L)
-  case class Publish(topic: String, msg: Any)
+  final case class Publish(topic: String, msg: Any)
 
   /**
    * INTERNAL API
@@ -238,7 +238,7 @@ class ClusterReceptionistExtension(system: ExtendedActorSystem) extends Extensio
    * but it can also be explicitly unregistered before termination.
    */
   def unregisterService(actor: ActorRef): Unit =
-    pubSubMediator ! DistributedPubSubMediator.Remove(actor.path.elements.mkString("/", "/", ""))
+    pubSubMediator ! DistributedPubSubMediator.Remove(actor.path.toStringWithoutAddress)
 
   /**
    * Register an actor that should be reachable for the clients to a named topic.
@@ -265,7 +265,7 @@ class ClusterReceptionistExtension(system: ExtendedActorSystem) extends Extensio
     else {
       val numberOfContacts: Int = config.getInt("number-of-contacts")
       val responseTunnelReceiveTimeout =
-        Duration(config.getMilliseconds("response-tunnel-receive-timeout"), MILLISECONDS)
+        config.getDuration("response-tunnel-receive-timeout", MILLISECONDS).millis
       val name = config.getString("name")
       // important to use val mediator here to activate it outside of ClusterReceptionist constructor
       val mediator = pubSubMediator
@@ -313,7 +313,7 @@ object ClusterReceptionist {
     @SerialVersionUID(1L)
     case object GetContacts
     @SerialVersionUID(1L)
-    case class Contacts(contactPoints: immutable.IndexedSeq[ActorSelection])
+    final case class Contacts(contactPoints: immutable.IndexedSeq[ActorSelection])
     @SerialVersionUID(1L)
     case object Ping
 
@@ -418,7 +418,7 @@ class ClusterReceptionist(
 
   def receive = {
     case msg @ (_: Send | _: SendToAll | _: Publish) ⇒
-      val tunnel = responseTunnel(sender)
+      val tunnel = responseTunnel(sender())
       tunnel ! Ping // keep alive
       pubSubMediator.tell(msg, tunnel)
 
@@ -427,17 +427,17 @@ class ClusterReceptionist(
       // is the same from all nodes (most of the time) and it also
       // load balances the client connections among the nodes in the cluster.
       if (numberOfContacts >= nodes.size) {
-        sender ! Contacts(nodes.map(a ⇒ context.actorSelection(self.path.toStringWithAddress(a)))(collection.breakOut))
+        sender() ! Contacts(nodes.map(a ⇒ context.actorSelection(self.path.toStringWithAddress(a)))(collection.breakOut))
       } else {
         // using toStringWithAddress in case the client is local, normally it is not, and
         // toStringWithAddress will use the remote address of the client
-        val a = consistentHash.nodeFor(sender.path.toStringWithAddress(cluster.selfAddress))
+        val a = consistentHash.nodeFor(sender().path.toStringWithAddress(cluster.selfAddress))
         val slice = {
           val first = nodes.from(a).tail.take(numberOfContacts)
           if (first.size == numberOfContacts) first
           else first ++ nodes.take(numberOfContacts - first.size)
         }
-        sender ! Contacts(slice.map(a ⇒ context.actorSelection(self.path.toStringWithAddress(a)))(collection.breakOut))
+        sender() ! Contacts(slice.map(a ⇒ context.actorSelection(self.path.toStringWithAddress(a)))(collection.breakOut))
       }
 
     case state: CurrentClusterState ⇒

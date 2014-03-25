@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.contrib.pattern;
@@ -34,6 +34,10 @@ public class ClusterSingletonManagerTest {
     system.actorOf(ClusterSingletonManager.defaultProps(Props.create(Consumer.class, queue, testActor), "consumer",
         new End(), "worker"), "singleton");
     //#create-singleton-manager
+
+    //#create-singleton-proxy
+    system.actorOf(ClusterSingletonProxy.defaultProps("user/singleton/consumer", "worker"), "consumerProxy");
+    //#create-singleton-proxy
   }
 
   static//documentation of how to keep track of the oldest member in user land

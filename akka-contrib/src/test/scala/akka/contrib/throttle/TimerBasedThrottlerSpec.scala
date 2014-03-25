@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.contrib.throttle
@@ -22,7 +22,7 @@ import akka.testkit._
 object TimerBasedThrottlerSpec {
   class EchoActor extends Actor {
     def receive = {
-      case x ⇒ sender ! x
+      case x ⇒ sender() ! x
     }
   }
 
@@ -46,7 +46,7 @@ class TimerBasedThrottlerSpec extends TestKit(ActorSystem("TimerBasedThrottlerSp
   import TimerBasedThrottlerSpec._
 
   override def afterAll {
-    shutdown(system)
+    shutdown()
   }
 
   "A throttler" must {

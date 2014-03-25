@@ -1,6 +1,3 @@
-/**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
- */
 package sample.kernel.hello
 
 import akka.actor.{ Actor, ActorSystem, Props }
@@ -20,7 +17,7 @@ class HelloActor extends Actor {
 
 class WorldActor extends Actor {
   def receive = {
-    case message: String => sender ! (message.toUpperCase + " world!")
+    case message: String => sender() ! (message.toUpperCase + " world!")
   }
 }
 

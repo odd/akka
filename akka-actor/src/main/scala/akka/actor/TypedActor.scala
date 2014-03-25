@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.actor
 
@@ -75,7 +75,7 @@ trait TypedActorFactory {
     val proxyVar = new AtomVar[R] //Chicken'n'egg-resolver
     val c = props.creator //Cache this to avoid closing over the Props
     val i = props.interfaces //Cache this to avoid closing over the Props
-    val ap = props.actorProps.withCreator(new TypedActor.TypedActor[R, T](proxyVar, c(), i))
+    val ap = Props(new TypedActor.TypedActor[R, T](proxyVar, c(), i)).withDeploy(props.actorProps.deploy)
     typedActor.createActorRefProxy(props, proxyVar, actorFactory.actorOf(ap))
   }
 
@@ -86,7 +86,7 @@ trait TypedActorFactory {
     val proxyVar = new AtomVar[R] //Chicken'n'egg-resolver
     val c = props.creator //Cache this to avoid closing over the Props
     val i = props.interfaces //Cache this to avoid closing over the Props
-    val ap = props.actorProps.withCreator(new akka.actor.TypedActor.TypedActor[R, T](proxyVar, c(), i))
+    val ap = Props(new akka.actor.TypedActor.TypedActor[R, T](proxyVar, c(), i)).withDeploy(props.actorProps.deploy)
     typedActor.createActorRefProxy(props, proxyVar, actorFactory.actorOf(ap, name))
   }
 
@@ -128,7 +128,7 @@ object TypedActor extends ExtensionId[TypedActorExtension] with ExtensionIdProvi
    * This class represents a Method call, and has a reference to the Method to be called and the parameters to supply
    * It's sent to the ActorRef backing the TypedActor and can be serialized and deserialized
    */
-  case class MethodCall(method: Method, parameters: Array[AnyRef]) {
+  final case class MethodCall(method: Method, parameters: Array[AnyRef]) {
 
     def isOneWay = method.getReturnType == java.lang.Void.TYPE
     def returnsFuture = classOf[Future[_]] isAssignableFrom method.getReturnType
@@ -170,7 +170,7 @@ object TypedActor extends ExtensionId[TypedActorExtension] with ExtensionIdProvi
    *
    * Represents the serialized form of a MethodCall, uses readResolve and writeReplace to marshall the call
    */
-  private[akka] case class SerializedMethodCall(ownerType: Class[_], methodName: String, parameterTypes: Array[Class[_]], serializedParameters: Array[(Int, Class[_], Array[Byte])]) {
+  private[akka] final case class SerializedMethodCall(ownerType: Class[_], methodName: String, parameterTypes: Array[Class[_]], serializedParameters: Array[(Int, Class[_], Array[Byte])]) {
 
     //TODO implement writeObject and readObject to serialize
     //TODO Possible optimization is to special encode the parameter-types to conserve space
@@ -307,7 +307,7 @@ object TypedActor extends ExtensionId[TypedActorExtension] with ExtensionIdProvi
         if (m.isOneWay) m(me)
         else {
           try {
-            val s = sender
+            val s = sender()
             m(me) match {
               case f: Future[_] if m.returnsFuture ⇒
                 implicit val dispatcher = context.dispatcher
@@ -321,14 +321,14 @@ object TypedActor extends ExtensionId[TypedActorExtension] with ExtensionIdProvi
             }
           } catch {
             case NonFatal(e) ⇒
-              sender ! Status.Failure(e)
+              sender() ! Status.Failure(e)
               throw e
           }
         }
       }
 
       case msg if me.isInstanceOf[Receiver] ⇒ withContext {
-        me.asInstanceOf[Receiver].onReceive(msg, sender)
+        me.asInstanceOf[Receiver].onReceive(msg, sender())
       }
     }
   }
@@ -442,7 +442,7 @@ object TypedActor extends ExtensionId[TypedActorExtension] with ExtensionIdProvi
   /**
    * INTERNAL API
    */
-  private[akka] case class SerializedTypedActorInvocationHandler(val actor: ActorRef, val timeout: FiniteDuration) {
+  private[akka] final case class SerializedTypedActorInvocationHandler(val actor: ActorRef, val timeout: FiniteDuration) {
     @throws(classOf[ObjectStreamException]) private def readResolve(): AnyRef = JavaSerializer.currentSystem.value match {
       case null ⇒ throw new IllegalStateException("SerializedTypedActorInvocationHandler.readResolve requires that JavaSerializer.currentSystem.value is set to a non-null value")
       case some ⇒ toTypedActorInvocationHandler(some)
@@ -522,7 +522,7 @@ object TypedProps {
  * It's used in TypedActorFactory.typedActorOf to configure a TypedActor instance.
  */
 @SerialVersionUID(1L)
-case class TypedProps[T <: AnyRef] protected[TypedProps] (
+final case class TypedProps[T <: AnyRef] protected[TypedProps] (
   interfaces: immutable.Seq[Class[_]],
   creator: () ⇒ T,
   dispatcher: String = TypedProps.defaultDispatcherId,
@@ -619,14 +619,14 @@ case class TypedProps[T <: AnyRef] protected[TypedProps] (
   def actorProps(): Props =
     if (dispatcher == Props.default.dispatcher)
       Props.default.withDeploy(deploy)
-    else Props(dispatcher = dispatcher).withDeploy(deploy)
+    else Props.default.withDispatcher(dispatcher).withDeploy(deploy)
 }
 
 /**
  * ContextualTypedActorFactory allows TypedActors to create children, effectively forming the same Actor Supervision Hierarchies
  * as normal Actors can.
  */
-case class ContextualTypedActorFactory(typedActor: TypedActorExtension, actorFactory: ActorContext) extends TypedActorFactory {
+final case class ContextualTypedActorFactory(typedActor: TypedActorExtension, actorFactory: ActorContext) extends TypedActorFactory {
   override def getActorRefFor(proxy: AnyRef): ActorRef = typedActor.getActorRefFor(proxy)
   override def isTypedActor(proxyOrNot: AnyRef): Boolean = typedActor.isTypedActor(proxyOrNot)
 }
@@ -637,11 +637,12 @@ class TypedActorExtension(val system: ExtendedActorSystem) extends TypedActorFac
   protected def typedActor = this
 
   import system.settings
+  import akka.util.Helpers.ConfigOps
 
   /**
    * Default timeout for typed actor methods with non-void return type
    */
-  final val DefaultReturnTimeout = Timeout(Duration(settings.config.getMilliseconds("akka.actor.typed.timeout"), MILLISECONDS))
+  final val DefaultReturnTimeout = Timeout(settings.config.getMillisDuration("akka.actor.typed.timeout"))
 
   /**
    * Retrieves the underlying ActorRef for the supplied TypedActor proxy, or null if none found

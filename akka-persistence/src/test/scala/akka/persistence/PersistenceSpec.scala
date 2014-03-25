@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.persistence
@@ -50,10 +50,12 @@ object PersistenceSpec {
     s"""
       akka.actor.serialize-creators = ${serialization}
       akka.actor.serialize-messages = ${serialization}
+      akka.persistence.publish-confirmations = on
       akka.persistence.publish-plugin-commands = on
       akka.persistence.journal.plugin = "akka.persistence.journal.${plugin}"
       akka.persistence.journal.leveldb.dir = "target/journal-${test}"
       akka.persistence.snapshot-store.local.dir = "target/snapshots-${test}/"
+      akka.test.single-expect-default = 10s
     """)
 }
 

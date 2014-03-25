@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.cluster
 
@@ -68,7 +68,7 @@ object MultiNodeClusterSpec {
         }
       case End ⇒
         testActor forward End
-        sender ! EndAck
+        sender() ! EndAck
       case EndAck ⇒
         testActor forward EndAck
     }
@@ -215,7 +215,7 @@ trait MultiNodeClusterSpec extends Suite with STMultiNodeSpec with WatchedByCoro
    * Join the specific node within the given period by sending repeated join
    * requests at periodic intervals until we succeed.
    */
-  def joinWithin(joinNode: RoleName, max: Duration = remaining, interval: Duration = 1.second): Unit = {
+  def joinWithin(joinNode: RoleName, max: Duration = remainingOrDefault, interval: Duration = 1.second): Unit = {
     def memberInState(member: Address, status: Seq[MemberStatus]): Boolean =
       clusterView.members.exists { m ⇒ (m.address == member) && status.contains(m.status) }
 

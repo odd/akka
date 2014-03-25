@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  * Copyright (C) 2012-2013 Eligotech BV.
  */
 
@@ -17,13 +17,13 @@ import akka.serialization.{ Serializer, SerializationExtension }
  * @see [[SnapshotSerializer]]
  */
 @SerialVersionUID(1L)
-case class Snapshot(data: Any)
+final case class Snapshot(data: Any)
 
 /**
  * INTERNAL API.
  */
 @SerialVersionUID(1L)
-private[serialization] case class SnapshotHeader(serializerId: Int, manifest: Option[String])
+private[serialization] final case class SnapshotHeader(serializerId: Int, manifest: Option[String])
 
 /**
  * [[Snapshot]] serializer.

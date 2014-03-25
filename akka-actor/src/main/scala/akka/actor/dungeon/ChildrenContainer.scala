@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor.dungeon
@@ -46,8 +46,8 @@ private[akka] object ChildrenContainer {
   sealed trait SuspendReason
   case object UserRequest extends SuspendReason
   // careful with those system messages, all handling to be taking place in ActorCell.scala!
-  case class Recreation(cause: Throwable) extends SuspendReason with WaitingForChildren
-  case class Creation() extends SuspendReason with WaitingForChildren
+  final case class Recreation(cause: Throwable) extends SuspendReason with WaitingForChildren
+  final case class Creation() extends SuspendReason with WaitingForChildren
   case object Termination extends SuspendReason
 
   class ChildRestartsIterable(stats: immutable.MapLike[_, ChildStats, _]) extends PartialImmutableValuesIterable[ChildStats, ChildRestartStats] {
@@ -156,7 +156,7 @@ private[akka] object ChildrenContainer {
    * type of container, depending on whether or not children are left and whether or not
    * the reason was “Terminating”.
    */
-  case class TerminatingChildrenContainer(c: immutable.TreeMap[String, ChildStats], toDie: Set[ActorRef], reason: SuspendReason)
+  final case class TerminatingChildrenContainer(c: immutable.TreeMap[String, ChildStats], toDie: Set[ActorRef], reason: SuspendReason)
     extends ChildrenContainer {
 
     override def add(name: String, stats: ChildRestartStats): ChildrenContainer = copy(c.updated(name, stats))

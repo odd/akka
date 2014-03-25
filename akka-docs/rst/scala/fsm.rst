@@ -251,7 +251,7 @@ of the modifiers described in the following:
   This modifier sends a reply to the currently processed message and otherwise
   does not modify the state transition.
 
-All modifier can be chained to achieve a nice and concise description:
+All modifiers can be chained to achieve a nice and concise description:
 
 .. includecode:: code/docs/actor/FSMDocSpec.scala
    :include: modifier-syntax
@@ -330,9 +330,9 @@ and will receive :class:`Transition(actorRef, oldState, newState)` messages
 whenever a new state is reached. External monitors may be unregistered by
 sending :class:`UnsubscribeTransitionCallBack(actorRef)` to the FSM actor.
 
-Registering a not-running listener generates a warning and fails gracefully.
-Stopping a listener without unregistering will remove the listener from the
-subscription list upon the next transition.
+Stopping a listener without unregistering will not remove the listener from the
+subscription list; use :class:`UnsubscribeTransitionCallback` before stopping
+the listener.
 
 Transforming State
 ------------------
@@ -362,8 +362,11 @@ You may set a timer using
 
 where :obj:`msg` is the message object which will be sent after the duration
 :obj:`interval` has elapsed. If :obj:`repeat` is :obj:`true`, then the timer is
-scheduled at fixed rate given by the :obj:`interval` parameter. Timers may be
-canceled using
+scheduled at fixed rate given by the :obj:`interval` parameter.
+Any existing timer with the same name will automatically be canceled before
+adding the new timer.
+
+Timers may be canceled using
 
   :func:`cancelTimer(name)`
 
@@ -476,7 +479,6 @@ zero.
 Examples
 ========
 
-A bigger FSM example contrasted with Actor's :meth:`become`/:meth:`unbecome` can be found in the sources:
-
- * `Dining Hakkers using FSM <https://github.com/akka/akka/blob/master/akka-samples/akka-sample-fsm/src/main/scala/DiningHakkersOnFsm.scala#L1>`_
- * `Dining Hakkers using become <https://github.com/akka/akka/blob/master/akka-samples/akka-sample-fsm/src/main/scala/DiningHakkersOnBecome.scala#L1>`_
+A bigger FSM example contrasted with Actor's :meth:`become`/:meth:`unbecome` can be found in
+the `Typesafe Activator <http://www.typesafe.com/platform/getstarted>`_ template named 
+`Akka FSM in Scala <http://www.typesafe.com/activator/template/akka-sample-fsm-scala>`_

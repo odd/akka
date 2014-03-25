@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.io
@@ -24,7 +24,7 @@ private[io] class TcpOutgoingConnection(_tcp: TcpExt,
                                         channelRegistry: ChannelRegistry,
                                         commander: ActorRef,
                                         connect: Connect)
-  extends TcpConnection(_tcp, SocketChannel.open().configureBlocking(false).asInstanceOf[SocketChannel]) {
+  extends TcpConnection(_tcp, SocketChannel.open().configureBlocking(false).asInstanceOf[SocketChannel], connect.pullMode) {
 
   import connect._
 

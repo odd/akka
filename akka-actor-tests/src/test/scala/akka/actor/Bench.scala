@@ -8,9 +8,9 @@ package akka.actor
 object Chameneos {
 
   sealed trait ChameneosEvent
-  case class Meet(from: ActorRef, colour: Colour) extends ChameneosEvent
-  case class Change(colour: Colour) extends ChameneosEvent
-  case class MeetingCount(count: Int) extends ChameneosEvent
+  final case class Meet(from: ActorRef, colour: Colour) extends ChameneosEvent
+  final case class Change(colour: Colour) extends ChameneosEvent
+  final case class MeetingCount(count: Int) extends ChameneosEvent
   case object Exit extends ChameneosEvent
 
   abstract class Colour
@@ -42,7 +42,7 @@ object Chameneos {
 
       case Exit ⇒
         colour = FADED
-        sender ! MeetingCount(meetings)
+        sender() ! MeetingCount(meetings)
     }
 
     def complement(otherColour: Colour): Colour = colour match {
@@ -95,11 +95,11 @@ object Chameneos {
               n -= 1
               chameneo ! msg
               waitingChameneo = None
-            case None ⇒ waitingChameneo = Some(sender)
+            case None ⇒ waitingChameneo = Some(sender())
           }
         } else {
           waitingChameneo.foreach(_ ! Exit)
-          sender ! Exit
+          sender() ! Exit
         }
     }
   }

@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote.testconductor
 
@@ -14,7 +14,7 @@ import org.scalatest.BeforeAndAfterEach
 import java.net.{ InetSocketAddress, InetAddress }
 
 object BarrierSpec {
-  case class Failed(ref: ActorRef, thr: Throwable)
+  final case class Failed(ref: ActorRef, thr: Throwable)
   val config = """
     akka.testconductor.barrier-timeout = 5s
     akka.actor.provider = akka.remote.RemoteActorRefProvider
@@ -548,7 +548,7 @@ class BarrierSpec extends AkkaSpec(BarrierSpec.config) with ImplicitSender {
         case x ⇒ testActor ! Failed(barrier, x); SupervisorStrategy.Restart
       }
       def receive = {
-        case _ ⇒ sender ! barrier
+        case _ ⇒ sender() ! barrier
       }
     }).withDeploy(Deploy.local)) ! ""
     expectMsgType[ActorRef]

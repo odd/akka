@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package docs.actor;
 
@@ -11,13 +11,16 @@ import static akka.pattern.Patterns.pipe;
 import static akka.pattern.Patterns.gracefulStop;
 //#import-gracefulStop
 
+import akka.actor.PoisonPill;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
 import akka.testkit.AkkaJUnitActorSystemResource;
+
 import org.junit.ClassRule;
 import org.junit.Test;
+
 
 //#import-gracefulStop
 import scala.concurrent.Await;
@@ -58,7 +61,6 @@ import akka.actor.Terminated;
 //#import-terminated
 //#import-untypedActor
 import akka.actor.UntypedActor;
-import akka.actor.UntypedActorFactory;
 //#import-untypedActor
 //#import-stash
 import akka.actor.UntypedActorWithStash;
@@ -118,43 +120,6 @@ public class UntypedActorDocTest {
     }
   }
   //#parametric-creator
-
-  @SuppressWarnings("deprecation")
-  @Test
-  public void createPropsDeprecated() {
-    //#creating-props-deprecated
-    // DEPRECATED: encourages to close over enclosing class
-    final Props props1 = new Props(new UntypedActorFactory() {
-      private static final long serialVersionUID = 1L;
-      @Override
-      public UntypedActor create() throws Exception {
-        return new MyUntypedActor();
-      }
-    });
-
-    // DEPRECATED: encourages to close over enclosing class
-    final Props props2 = new Props().withCreator(new UntypedActorFactory() {
-      private static final long serialVersionUID = 1L;
-      @Override
-      public UntypedActor create() throws Exception {
-        return new MyUntypedActor();
-      }
-    });
-
-    // these are DEPRECATED due to duplicate functionality with Props.create()
-    final Props props3 = new Props(MyUntypedActor.class);
-    final Props props4 = new Props().withCreator(MyUntypedActor.class);
-    //#creating-props-deprecated
-    new JavaTestKit(system) {
-      {
-        for (Props props : new Props[] { props1, props2, props3, props4 }) {
-          final ActorRef a = system.actorOf(props);
-          a.tell("hello", getRef());
-          expectMsgEquals("hello");
-        }
-      }
-    };
-  }
 
   @Test
   public void systemActorOf() {
@@ -437,11 +402,11 @@ public class UntypedActorDocTest {
 
   @Test
   public void usePatternsGracefulStop() throws Exception {
-    ActorRef actorRef = system.actorOf(Props.create(MyUntypedActor.class));
+    ActorRef actorRef = system.actorOf(Props.create(Manager.class));
     //#gracefulStop
     try {
       Future<Boolean> stopped =
-        gracefulStop(actorRef, Duration.create(5, TimeUnit.SECONDS));
+        gracefulStop(actorRef, Duration.create(5, TimeUnit.SECONDS), Manager.SHUTDOWN);
       Await.result(stopped, Duration.create(6, TimeUnit.SECONDS));
       // the actor has been stopped
     } catch (AskTimeoutException e) {
@@ -538,8 +503,15 @@ public class UntypedActorDocTest {
      * @return a Props for creating this actor, which can then be further configured
      *         (e.g. calling `.withDispatcher()` on it)
      */
-    public static Props props(int magicNumber) {
-      return Props.create(DemoActor.class, magicNumber);
+    public static Props props(final int magicNumber) {
+      return Props.create(new Creator<DemoActor>() {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public DemoActor create() throws Exception {
+          return new DemoActor(magicNumber);
+        }
+      });
     }
     
     final int magicNumber;
@@ -617,6 +589,43 @@ public class UntypedActorDocTest {
 
     private String operation() {
       return "Hi";
+    }
+  }
+  
+  static
+  //#gracefulStop-actor
+  public class Manager extends UntypedActor {
+    
+    public static final String SHUTDOWN = "shutdown";
+    
+    ActorRef worker = getContext().watch(getContext().actorOf(
+        Props.create(Cruncher.class), "worker"));
+    
+    public void onReceive(Object message) {
+      if (message.equals("job")) {
+        worker.tell("crunch", getSelf());
+      } else if (message.equals(SHUTDOWN)) {
+        worker.tell(PoisonPill.getInstance(), getSelf());
+        getContext().become(shuttingDown);
+      }
+    }
+    
+    Procedure<Object> shuttingDown = new Procedure<Object>() {
+      @Override
+      public void apply(Object message) {
+        if (message.equals("job")) {
+          getSender().tell("service unavailable, shutting down", getSelf());
+        } else if (message instanceof Terminated) {
+          getContext().stop(getSelf());
+        }
+      }
+    };
+  }
+  //#gracefulStop-actor
+  
+  static class Cruncher extends UntypedActor {
+    public void onReceive(Object message) {
+     // crunch...
     }
   }
 

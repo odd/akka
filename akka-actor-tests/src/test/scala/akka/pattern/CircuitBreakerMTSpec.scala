@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.pattern
 
@@ -24,7 +24,7 @@ class CircuitBreakerMTSpec extends AkkaSpec {
         Await.result(breaker.withCircuitBreaker(Future(throw new RuntimeException("FAIL"))) recover {
           case _: CircuitBreakerOpenException ⇒ true
           case _                              ⇒ false
-        }, remaining)
+        }, remainingOrDefault)
 
       // fire some failing calls
       1 to (maxFailures + 1) foreach { _ ⇒ failingCall() }
@@ -49,7 +49,7 @@ class CircuitBreakerMTSpec extends AkkaSpec {
       val futures = testCallsWithBreaker()
       val result = Await.result(Future.sequence(futures), 5.second.dilated)
       result.size should be(numberOfTestCalls)
-      result.toSet should equal(Set("succeed"))
+      result.toSet should be(Set("succeed"))
     }
 
     "transition to open state upon reaching failure limit and fail-fast" in {
@@ -57,7 +57,7 @@ class CircuitBreakerMTSpec extends AkkaSpec {
       val futures = testCallsWithBreaker()
       val result = Await.result(Future.sequence(futures), 5.second.dilated)
       result.size should be(numberOfTestCalls)
-      result.toSet should equal(Set("CBO"))
+      result.toSet should be(Set("CBO"))
     }
 
     "allow a single call through in half-open state" in {
@@ -72,7 +72,7 @@ class CircuitBreakerMTSpec extends AkkaSpec {
       val futures = testCallsWithBreaker()
       val result = Await.result(Future.sequence(futures), 5.second.dilated)
       result.size should be(numberOfTestCalls)
-      result.toSet should equal(Set("succeed", "CBO"))
+      result.toSet should be(Set("succeed", "CBO"))
     }
 
     "recover and reset the breaker after the reset timeout" in {
@@ -92,7 +92,7 @@ class CircuitBreakerMTSpec extends AkkaSpec {
       val futures = testCallsWithBreaker()
       val result = Await.result(Future.sequence(futures), 5.second.dilated)
       result.size should be(numberOfTestCalls)
-      result.toSet should equal(Set("succeed"))
+      result.toSet should be(Set("succeed"))
     }
   }
 }

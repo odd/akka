@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.actor
 
@@ -45,7 +45,7 @@ abstract class ActorSelection extends Serializable {
    *
    * Works, no matter whether originally sent with tell/'!' or ask/'?'.
    */
-  def forward(message: Any)(implicit context: ActorContext) = tell(message, context.sender)
+  def forward(message: Any)(implicit context: ActorContext) = tell(message, context.sender())
 
   /**
    * Resolve the [[ActorRef]] matching this selection.
@@ -86,6 +86,37 @@ abstract class ActorSelection extends Serializable {
       builder.append("#").append(anchor.path.uid)
 
     builder.append("), Path(").append(path.mkString("/", "/", "")).append(")]")
+    builder.toString
+  }
+
+  /**
+   * The [[akka.actor.ActorPath]] of the anchor actor.
+   */
+  def anchorPath: ActorPath = anchor.path
+
+  /**
+   * String representation of the path elements, starting with "/" and separated with "/".
+   */
+  def pathString: String = path.mkString("/", "/", "")
+
+  /**
+   * String representation of the actor selection suitable for storage and recreation.
+   * The output is similar to the URI fragment returned by [[akka.actor.ActorPath.toSerializationFormat]].
+   * @return URI fragment
+   */
+  def toSerializationFormat: String = {
+    val anchorPath = anchor match {
+      case a: ActorRefWithCell ⇒ anchor.path.toStringWithAddress(a.provider.getDefaultAddress)
+      case _                   ⇒ anchor.path.toString
+    }
+
+    val builder = new java.lang.StringBuilder()
+    builder.append(anchorPath)
+    val lastChar = builder.charAt(builder.length - 1)
+    if (path.nonEmpty && lastChar != '/')
+      builder.append(path.mkString("/", "/", ""))
+    else if (path.nonEmpty)
+      builder.append(path.mkString("/"))
     builder.toString
   }
 
@@ -208,7 +239,7 @@ trait ScalaActorSelection {
  * message is delivered by traversing the various actor paths involved.
  */
 @SerialVersionUID(1L)
-private[akka] case class ActorSelectionMessage(msg: Any, elements: immutable.Iterable[SelectionPathElement])
+private[akka] final case class ActorSelectionMessage(msg: Any, elements: immutable.Iterable[SelectionPathElement])
   extends AutoReceivedMessage with PossiblyHarmful {
 
   def identifyRequest: Option[Identify] = msg match {
@@ -227,7 +258,7 @@ private[akka] sealed trait SelectionPathElement
  * INTERNAL API
  */
 @SerialVersionUID(2L)
-private[akka] case class SelectChildName(name: String) extends SelectionPathElement {
+private[akka] final case class SelectChildName(name: String) extends SelectionPathElement {
   override def toString: String = name
 }
 
@@ -235,7 +266,7 @@ private[akka] case class SelectChildName(name: String) extends SelectionPathElem
  * INTERNAL API
  */
 @SerialVersionUID(2L)
-private[akka] case class SelectChildPattern(patternStr: String) extends SelectionPathElement {
+private[akka] final case class SelectChildPattern(patternStr: String) extends SelectionPathElement {
   val pattern: Pattern = Helpers.makePattern(patternStr)
   override def toString: String = patternStr
 }
@@ -253,5 +284,5 @@ private[akka] case object SelectParent extends SelectionPathElement {
  * `Future` is completed with this failure.
  */
 @SerialVersionUID(1L)
-case class ActorNotFound(selection: ActorSelection) extends RuntimeException("Actor not found for: " + selection)
+final case class ActorNotFound(selection: ActorSelection) extends RuntimeException("Actor not found for: " + selection)
 

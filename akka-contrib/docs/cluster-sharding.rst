@@ -3,19 +3,22 @@
 Cluster Sharding
 ================
 
-The typical use case for this feature is when you have many stateful actors that together consume
-more resources (e.g. memory) than fit on one machine. You need to distribute them across
-several nodes in the cluster and you want to be able to interact with them using their
-logical identifier, but without having to care about their physical location in the cluster,
-which might also change over time. It could for example be actors representing Aggregate Roots in
-Domain-Driven Design terminology. Here we call these actors "entries". These actors
-typically have persistent (durable) state, but this feature is not limited to
-actors with persistent state.
+Cluster sharding is useful when you need to distribute actors across several nodes in the cluster and want to
+be able to interact with them using their logical identifier, but without having to care about
+their physical location in the cluster, which might also change over time.
+
+It could for example be actors representing Aggregate Roots in Domain-Driven Design terminology.
+Here we call these actors "entries". These actors typically have persistent (durable) state, 
+but this feature is not limited to actors with persistent state.
+
+Cluster sharding is typically used when you have many stateful actors that together consume
+more resources (e.g. memory) than fit on one machine. If you only have a few stateful actors
+it might be easier to run them on a :ref:`cluster-singleton` node. 
 
 In this context sharding means that actors with an identifier, so called entries,
 can be automatically distributed across multiple nodes in the cluster. Each entry
 actor runs only at one place, and messages can be sent to the entry without requiring
-the sender to know the location of the destination actor. This is achieved by sending
+the sender() to know the location of the destination actor. This is achieved by sending
 the messages via a ``ShardRegion`` actor provided by this extension, which knows how
 to route the message with the entry id to the final destination.
 
@@ -107,6 +110,9 @@ first message for a specific entry is delivered.
 
 .. includecode:: @contribSrc@/src/multi-jvm/scala/akka/contrib/pattern/ClusterShardingSpec.scala#counter-usage
 
+A more comprehensive sample is available in the `Typesafe Activator <http://www.typesafe.com/platform/getstarted>`_
+tutorial named `Akka Cluster Sharding with Scala! <http://www.typesafe.com/activator/template/akka-cluster-sharding-scala>`_.
+
 How it works
 ------------
 
@@ -188,7 +194,7 @@ actor will take over and the state is recovered. During such a failure period sh
 with known location are still available, while messages for new (unknown) shards
 are buffered until the new ``ShardCoordinator`` becomes available.
 
-As long as a sender uses the same ``ShardRegion`` actor to deliver messages to an entry
+As long as a sender() uses the same ``ShardRegion`` actor to deliver messages to an entry
 actor the order of the messages is preserved. As long as the buffer limit is not reached
 messages are delivered on a best effort basis, with at-most once delivery semantics,
 in the same way as ordinary message sending. Reliable end-to-end messaging, with

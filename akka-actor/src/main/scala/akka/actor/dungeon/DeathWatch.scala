@@ -1,14 +1,15 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor.dungeon
 
-import akka.actor.{ Terminated, InternalActorRef, ActorRef, ActorRefScope, ActorCell, Actor, Address, AddressTerminated }
+import akka.actor.{ Terminated, InternalActorRef, ActorRef, ActorRefScope, ActorCell, Actor, Address }
 import akka.dispatch.sysmsg.{ DeathWatchNotification, Watch, Unwatch }
 import akka.event.Logging.{ Warning, Error, Debug }
 import scala.util.control.NonFatal
 import akka.actor.MinimalActorRef
+import akka.event.AddressTerminatedTopic
 
 private[akka] trait DeathWatch { this: ActorCell ⇒
 
@@ -50,7 +51,6 @@ private[akka] trait DeathWatch { this: ActorCell ⇒
    * it will be propagated to user's receive.
    */
   protected def watchedActorTerminated(actor: ActorRef, existenceConfirmed: Boolean, addressTerminated: Boolean): Unit = {
-    if (childrenRefs.getByRef(actor).isDefined) handleChildTerminated(actor)
     if (watchingContains(actor)) {
       maintainAddressTerminatedSubscription(actor) {
         watching = removeFromSet(actor, watching)
@@ -60,6 +60,7 @@ private[akka] trait DeathWatch { this: ActorCell ⇒
         terminatedQueuedFor(actor)
       }
     }
+    if (childrenRefs.getByRef(actor).isDefined) handleChildTerminated(actor)
   }
 
   private[akka] def terminatedQueuedFor(subject: ActorRef): Unit =
@@ -77,12 +78,13 @@ private[akka] trait DeathWatch { this: ActorCell ⇒
     if (subject.path.uid != ActorCell.undefinedUid) (set - subject) - new UndefinedUidActorRef(subject)
     else set filterNot (_.path == subject.path)
 
-  protected def tellWatchersWeDied(actor: Actor): Unit =
+  protected def tellWatchersWeDied(): Unit =
     if (!watchedBy.isEmpty) {
       try {
+        // Don't need to send to parent parent since it receives a DWN by default
         def sendTerminated(ifLocal: Boolean)(watcher: ActorRef): Unit =
-          if (watcher.asInstanceOf[ActorRefScope].isLocal == ifLocal) watcher.asInstanceOf[InternalActorRef].sendSystemMessage(
-            DeathWatchNotification(self, existenceConfirmed = true, addressTerminated = false))
+          if (watcher.asInstanceOf[ActorRefScope].isLocal == ifLocal && watcher != parent)
+            watcher.asInstanceOf[InternalActorRef].sendSystemMessage(DeathWatchNotification(self, existenceConfirmed = true, addressTerminated = false))
 
         /*
          * It is important to notify the remote watchers first, otherwise RemoteDaemon might shut down, causing
@@ -123,7 +125,7 @@ private[akka] trait DeathWatch { this: ActorCell ⇒
     if (watcheeSelf && !watcherSelf) {
       if (!watchedBy.contains(watcher)) maintainAddressTerminatedSubscription(watcher) {
         watchedBy += watcher
-        if (system.settings.DebugLifecycle) publish(Debug(self.path.toString, clazz(actor), "now monitoring " + watcher))
+        if (system.settings.DebugLifecycle) publish(Debug(self.path.toString, clazz(actor), s"now watched by $watcher"))
       }
     } else if (!watcheeSelf && watcherSelf) {
       watch(watchee)
@@ -139,7 +141,7 @@ private[akka] trait DeathWatch { this: ActorCell ⇒
     if (watcheeSelf && !watcherSelf) {
       if (watchedBy.contains(watcher)) maintainAddressTerminatedSubscription(watcher) {
         watchedBy -= watcher
-        if (system.settings.DebugLifecycle) publish(Debug(self.path.toString, clazz(actor), "stopped monitoring " + watcher))
+        if (system.settings.DebugLifecycle) publish(Debug(self.path.toString, clazz(actor), s"no longer watched by $watcher"))
       }
     } else if (!watcheeSelf && watcherSelf) {
       unwatch(watchee)
@@ -191,9 +193,9 @@ private[akka] trait DeathWatch { this: ActorCell ⇒
     }
   }
 
-  private def unsubscribeAddressTerminated(): Unit = system.eventStream.unsubscribe(self, classOf[AddressTerminated])
+  private def unsubscribeAddressTerminated(): Unit = AddressTerminatedTopic(system).unsubscribe(self)
 
-  private def subscribeAddressTerminated(): Unit = system.eventStream.subscribe(self, classOf[AddressTerminated])
+  private def subscribeAddressTerminated(): Unit = AddressTerminatedTopic(system).subscribe(self)
 
 }
 

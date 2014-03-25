@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.routing
 
@@ -46,7 +46,7 @@ class BroadcastSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
       routedActor ! 1
       routedActor ! "end"
 
-      Await.ready(doneLatch, remaining)
+      Await.ready(doneLatch, remainingOrDefault)
 
       counter1.get should be(1)
       counter2.get should be(1)
@@ -61,7 +61,7 @@ class BroadcastSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
           case "end" ⇒ doneLatch.countDown()
           case msg: Int ⇒
             counter1.addAndGet(msg)
-            sender ! "ack"
+            sender() ! "ack"
         }
       }))
 
@@ -78,7 +78,7 @@ class BroadcastSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
       routedActor ? 1
       routedActor ! "end"
 
-      Await.ready(doneLatch, remaining)
+      Await.ready(doneLatch, remainingOrDefault)
 
       counter1.get should be(1)
       counter2.get should be(1)

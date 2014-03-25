@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote.transport
 
@@ -122,11 +122,11 @@ abstract class AbstractTransportAdapterHandle(val originalLocalAddress: Address,
 object ActorTransportAdapter {
   sealed trait TransportOperation extends NoSerializationVerificationNeeded
 
-  case class ListenerRegistered(listener: AssociationEventListener) extends TransportOperation
-  case class AssociateUnderlying(remoteAddress: Address, statusPromise: Promise[AssociationHandle]) extends TransportOperation
-  case class ListenUnderlying(listenAddress: Address,
-                              upstreamListener: Future[AssociationEventListener]) extends TransportOperation
-  case class DisassociateUnderlying(info: DisassociateInfo = AssociationHandle.Unknown) extends TransportOperation
+  final case class ListenerRegistered(listener: AssociationEventListener) extends TransportOperation
+  final case class AssociateUnderlying(remoteAddress: Address, statusPromise: Promise[AssociationHandle]) extends TransportOperation
+  final case class ListenUnderlying(listenAddress: Address,
+                                    upstreamListener: Future[AssociationEventListener]) extends TransportOperation
+  final case class DisassociateUnderlying(info: DisassociateInfo = AssociationHandle.Unknown) extends TransportOperation
 
   implicit val AskTimeout = Timeout(5.seconds)
 }
@@ -141,9 +141,8 @@ abstract class ActorTransportAdapter(wrappedTransport: Transport, system: ActorS
   // Write once variable initialized when Listen is called.
   @volatile protected var manager: ActorRef = _
 
-  // FIXME #3074 how to replace actorFor here?
   private def registerManager(): Future[ActorRef] =
-    (system.actorFor("/system/transports") ? RegisterTransportActor(managerProps, managerName)).mapTo[ActorRef]
+    (system.actorSelection("/system/transports") ? RegisterTransportActor(managerProps, managerName)).mapTo[ActorRef]
 
   override def interceptListen(listenAddress: Address,
                                listenerPromise: Future[AssociationEventListener]): Future[AssociationEventListener] = {

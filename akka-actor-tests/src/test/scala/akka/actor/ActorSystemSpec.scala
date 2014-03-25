@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.actor
 
@@ -7,17 +7,17 @@ import language.postfixOps
 import akka.testkit._
 import org.scalatest.junit.JUnitSuiteLike
 import com.typesafe.config.ConfigFactory
-import scala.concurrent.Await
+import scala.concurrent.{ ExecutionContext, Await, Future }
 import scala.concurrent.duration._
 import java.util.concurrent.{ RejectedExecutionException, ConcurrentLinkedQueue }
 import akka.util.Timeout
 import akka.japi.Util.immutableSeq
-import scala.concurrent.Future
 import akka.pattern.ask
 import akka.dispatch._
 import com.typesafe.config.Config
 import java.util.concurrent.{ LinkedBlockingQueue, BlockingQueue, TimeUnit }
 import akka.util.Switch
+import akka.util.Helpers.ConfigOps
 
 class JavaExtensionSpec extends JavaExtension with JUnitSuiteLike
 
@@ -37,7 +37,7 @@ object ActorSystemSpec {
 
     def receive = {
       case n: Int ⇒
-        master = sender
+        master = sender()
         terminaters = Set() ++ (for (i ← 1 to n) yield {
           val man = context.watch(context.system.actorOf(Props[Terminater]))
           man ! "run"
@@ -71,7 +71,7 @@ object ActorSystemSpec {
     }
   }
 
-  case class FastActor(latch: TestLatch, testActor: ActorRef) extends Actor {
+  final case class FastActor(latch: TestLatch, testActor: ActorRef) extends Actor {
     val ref1 = context.actorOf(Props.empty)
     val ref2 = context.actorFor(ref1.path.toString)
     testActor ! ref2.getClass
@@ -87,9 +87,9 @@ object ActorSystemSpec {
       this,
       config.getString("id"),
       config.getInt("throughput"),
-      Duration(config.getNanoseconds("throughput-deadline-time"), TimeUnit.NANOSECONDS),
+      config.getNanosDuration("throughput-deadline-time"),
       configureExecutor(),
-      Duration(config.getMilliseconds("shutdown-timeout"), TimeUnit.MILLISECONDS)) {
+      config.getMillisDuration("shutdown-timeout")) {
       val doneIt = new Switch
       override protected[akka] def registerForExecution(mbox: Mailbox, hasMessageHint: Boolean, hasSystemMessageHint: Boolean): Boolean = {
         val ret = super.registerForExecution(mbox, hasMessageHint, hasSystemMessageHint)
@@ -109,6 +109,19 @@ object ActorSystemSpec {
     override def dispatcher(): MessageDispatcher = instance
   }
 
+  class TestExecutionContext(testActor: ActorRef, underlying: ExecutionContext) extends ExecutionContext {
+
+    def execute(runnable: Runnable): Unit = {
+      testActor ! "called"
+      underlying.execute(runnable)
+    }
+
+    def reportFailure(t: Throwable): Unit = {
+      testActor ! "failed"
+      underlying.reportFailure(t)
+    }
+  }
+
   val config = s"""
       akka.extensions = ["akka.actor.TestExtension"]
       slow {
@@ -125,7 +138,7 @@ class ActorSystemSpec extends AkkaSpec(ActorSystemSpec.config) with ImplicitSend
   "An ActorSystem" must {
 
     "use scala.concurrent.Future's InternalCallbackEC" in {
-      system.asInstanceOf[ActorSystemImpl].internalCallingThreadExecutionContext.getClass.getName should equal("scala.concurrent.Future$InternalCallbackExecutor$")
+      system.asInstanceOf[ActorSystemImpl].internalCallingThreadExecutionContext.getClass.getName should be("scala.concurrent.Future$InternalCallbackExecutor$")
     }
 
     "reject invalid names" in {
@@ -151,8 +164,8 @@ class ActorSystemSpec extends AkkaSpec(ActorSystemSpec.config) with ImplicitSend
     "support extensions" in {
       // TestExtension is configured and should be loaded at startup
       system.hasExtension(TestExtension) should be(true)
-      TestExtension(system).system should equal(system)
-      system.extension(TestExtension).system should equal(system)
+      TestExtension(system).system should be(system)
+      system.extension(TestExtension).system should be(system)
     }
 
     "log dead letters" in {
@@ -228,7 +241,7 @@ class ActorSystemSpec extends AkkaSpec(ActorSystemSpec.config) with ImplicitSend
       import system.dispatcher
       implicit val timeout = Timeout((20 seconds).dilated)
       val waves = for (i ← 1 to 3) yield system.actorOf(Props[ActorSystemSpec.Waves]) ? 50000
-      Await.result(Future.sequence(waves), timeout.duration + 5.seconds) should equal(Seq("done", "done", "done"))
+      Await.result(Future.sequence(waves), timeout.duration + 5.seconds) should be(Seq("done", "done", "done"))
     }
 
     "find actors that just have been created" in {
@@ -304,6 +317,54 @@ class ActorSystemSpec extends AkkaSpec(ActorSystemSpec.config) with ImplicitSend
       }
     }
 
+    "work with a passed in ExecutionContext" in {
+      val ecProbe = TestProbe()
+      val ec = new ActorSystemSpec.TestExecutionContext(ecProbe.ref, ExecutionContexts.global())
+
+      val system2 = ActorSystem(name = "default", defaultExecutionContext = Some(ec))
+
+      try {
+        val ref = system2.actorOf(Props(new Actor {
+          def receive = {
+            case "ping" ⇒ sender ! "pong"
+          }
+        }))
+
+        val probe = TestProbe()
+
+        ref.tell("ping", probe.ref)
+
+        ecProbe.expectMsg(1.second, "called")
+        probe.expectMsg(1.second, "pong")
+      } finally {
+        shutdown(system2)
+      }
+    }
+
+    "not use passed in ExecutionContext if executor is configured" in {
+      val ecProbe = TestProbe()
+      val ec = new ActorSystemSpec.TestExecutionContext(ecProbe.ref, ExecutionContexts.global())
+
+      val config = ConfigFactory.parseString("akka.actor.default-dispatcher.executor = \"fork-join-executor\"")
+      val system2 = ActorSystem(name = "default", config = Some(config), defaultExecutionContext = Some(ec))
+
+      try {
+        val ref = system2.actorOf(Props(new Actor {
+          def receive = {
+            case "ping" ⇒ sender ! "pong"
+          }
+        }))
+
+        val probe = TestProbe()
+
+        ref.tell("ping", probe.ref)
+
+        ecProbe.expectNoMsg()
+        probe.expectMsg(1.second, "pong")
+      } finally {
+        shutdown(system2)
+      }
+    }
   }
 
 }

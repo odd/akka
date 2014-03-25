@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -195,11 +195,7 @@ private[akka] class Deployer(val settings: ActorSystem.Settings, val dynamicAcce
           resizerEnabled.withFallback(deployment)
         else deployment
 
-      val fqn = routerTypeMapping.getOrElse(routerType,
-        if (deployment.getStringList("routees.paths").isEmpty())
-          routerTypeMapping.getOrElse(routerType + "-pool", routerType)
-        else
-          routerTypeMapping.getOrElse(routerType + "-group", routerType))
+      val fqn = routerTypeMapping.getOrElse(routerType, routerType)
 
       def throwCannotInstantiateRouter(args: Seq[(Class[_], AnyRef)], cause: Throwable) =
         throw new IllegalArgumentException(

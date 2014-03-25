@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  * Copyright (C) 2012-2013 Eligotech BV.
  */
 
@@ -10,7 +10,7 @@ import java.nio.ByteBuffer
 /**
  * LevelDB key.
  */
-private[leveldb] case class Key(
+private[leveldb] final case class Key(
   processorId: Int,
   sequenceNr: Long,
   channelId: Int)

@@ -1,10 +1,11 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.persistence
 
 import scala.collection.immutable.Seq
+import scala.concurrent.duration._
 
 import com.typesafe.config.Config
 
@@ -12,8 +13,8 @@ import akka.actor._
 import akka.testkit.{ ImplicitSender, AkkaSpec }
 
 object EventsourcedSpec {
-  case class Cmd(data: Any)
-  case class Evt(data: Any)
+  final case class Cmd(data: Any)
+  final case class Evt(data: Any)
 
   abstract class ExampleProcessor(name: String) extends NamedProcessor(name) with EventsourcedProcessor {
     var events: List[Any] = Nil
@@ -27,7 +28,7 @@ object EventsourcedSpec {
       case GetState ⇒ sender ! events.reverse
     }
 
-    def receiveReplay = updateState
+    def receiveRecover = updateState
   }
 
   class Behavior1Processor(name: String) extends ExampleProcessor(name) {
@@ -122,7 +123,7 @@ object EventsourcedSpec {
   }
 
   class SnapshottingEventsourcedProcessor(name: String, probe: ActorRef) extends ExampleProcessor(name) {
-    override def receiveReplay = super.receiveReplay orElse {
+    override def receiveRecover = super.receiveRecover orElse {
       case SnapshotOffer(_, events: List[_]) ⇒
         probe ! "offered"
         this.events = events
@@ -133,6 +134,23 @@ object EventsourcedSpec {
         persist(Seq(Evt(s"${data}-41"), Evt(s"${data}-42")))(updateState)
       case SaveSnapshotSuccess(_) ⇒ probe ! "saved"
       case "snap"                 ⇒ saveSnapshot(events)
+    }
+  }
+
+  class SnapshottingBecomingEventsourcedProcessor(name: String, probe: ActorRef) extends SnapshottingEventsourcedProcessor(name, probe) {
+    val becomingRecover: Receive = {
+      case msg: SnapshotOffer ⇒
+        context.become(becomingCommand)
+        // sending ourself a normal message here also tests
+        // that we stash them until recovery is complete
+        self ! "It's changing me"
+        super.receiveRecover(msg)
+    }
+
+    override def receiveRecover = becomingRecover.orElse(super.receiveRecover)
+
+    val becomingCommand: Receive = receiveCommand orElse {
+      case "It's changing me" ⇒ probe ! "I am becoming"
     }
   }
 
@@ -293,6 +311,21 @@ abstract class EventsourcedSpec(config: Config) extends AkkaSpec(config) with Pe
 
       val processor2 = system.actorOf(Props(classOf[SnapshottingEventsourcedProcessor], name, testActor))
       expectMsg("offered")
+      processor2 ! GetState
+      expectMsg(List("a-1", "a-2", "b-41", "b-42", "c-41", "c-42"))
+    }
+    "support context.become during recovery" in {
+      val processor1 = system.actorOf(Props(classOf[SnapshottingEventsourcedProcessor], name, testActor))
+      processor1 ! Cmd("b")
+      processor1 ! "snap"
+      processor1 ! Cmd("c")
+      expectMsg("saved")
+      processor1 ! GetState
+      expectMsg(List("a-1", "a-2", "b-41", "b-42", "c-41", "c-42"))
+
+      val processor2 = system.actorOf(Props(classOf[SnapshottingBecomingEventsourcedProcessor], name, testActor))
+      expectMsg("offered")
+      expectMsg("I am becoming")
       processor2 ! GetState
       expectMsg(List("a-1", "a-2", "b-41", "b-42", "c-41", "c-42"))
     }

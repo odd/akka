@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.routing
 
@@ -27,9 +27,6 @@ object ResizerSpec {
         }
       }
     }
-    bal-disp {
-      type = BalancingDispatcher
-    }
     """
 
   class TestActor extends Actor {
@@ -51,7 +48,7 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
   }
 
   def routeeSize(router: ActorRef): Int =
-    Await.result(router ? GetRoutees, remaining).asInstanceOf[Routees].routees.size
+    Await.result(router ? GetRoutees, timeout.duration).asInstanceOf[Routees].routees.size
 
   "DefaultResizer" must {
 
@@ -110,7 +107,7 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
       router ! latch
       router ! latch
 
-      Await.ready(latch, remaining)
+      Await.ready(latch, remainingOrDefault)
 
       // messagesPerResize is 10 so there is no risk of additional resize
       routeeSize(router) should be(2)
@@ -125,7 +122,7 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
       router ! latch
       router ! latch
 
-      Await.ready(latch, remaining)
+      Await.ready(latch, remainingOrDefault)
 
       routeeSize(router) should be(2)
     }
@@ -147,8 +144,8 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
         Props(new Actor {
           def receive = {
             case d: FiniteDuration ⇒
-              Thread.sleep(d.dilated.toMillis); sender ! "done"
-            case "echo" ⇒ sender ! "reply"
+              Thread.sleep(d.dilated.toMillis); sender() ! "done"
+            case "echo" ⇒ sender() ! "reply"
           }
         })))
 

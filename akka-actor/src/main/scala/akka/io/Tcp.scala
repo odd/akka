@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.io
@@ -18,12 +18,6 @@ import java.lang.{ Iterable ⇒ JIterable }
 
 /**
  * TCP Extension for Akka’s IO layer.
- *
- * <b>All contents of the `akka.io` package is marked “experimental”.</b>
- *
- * This marker signifies that APIs may still change in response to user feedback
- * through-out the 2.2 release cycle. The implementation itself is considered
- * stable and ready for production use.
  *
  * For a full description of the design and philosophy behind this IO
  * implementation please refer to <a href="http://doc.akka.io/">the Akka online documentation</a>.
@@ -61,7 +55,7 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
      *
      * For more information see [[java.net.Socket.setKeepAlive]]
      */
-    case class KeepAlive(on: Boolean) extends SocketOption {
+    final case class KeepAlive(on: Boolean) extends SocketOption {
       override def afterConnect(s: Socket): Unit = s.setKeepAlive(on)
     }
 
@@ -72,7 +66,7 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
      *
      * For more information see [[java.net.Socket.setOOBInline]]
      */
-    case class OOBInline(on: Boolean) extends SocketOption {
+    final case class OOBInline(on: Boolean) extends SocketOption {
       override def afterConnect(s: Socket): Unit = s.setOOBInline(on)
     }
 
@@ -86,7 +80,7 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
      *
      * For more information see [[java.net.Socket.setTcpNoDelay]]
      */
-    case class TcpNoDelay(on: Boolean) extends SocketOption {
+    final case class TcpNoDelay(on: Boolean) extends SocketOption {
       override def afterConnect(s: Socket): Unit = s.setTcpNoDelay(on)
     }
 
@@ -116,10 +110,11 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
    * @param localAddress optionally specifies a specific address to bind to
    * @param options Please refer to the [[SO]] object for a list of all supported options.
    */
-  case class Connect(remoteAddress: InetSocketAddress,
-                     localAddress: Option[InetSocketAddress] = None,
-                     options: immutable.Traversable[SocketOption] = Nil,
-                     timeout: Option[FiniteDuration] = None) extends Command
+  final case class Connect(remoteAddress: InetSocketAddress,
+                           localAddress: Option[InetSocketAddress] = None,
+                           options: immutable.Traversable[SocketOption] = Nil,
+                           timeout: Option[FiniteDuration] = None,
+                           pullMode: Boolean = false) extends Command
 
   /**
    * The Bind message is send to the TCP manager actor, which is obtained via
@@ -140,10 +135,11 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
    *
    * @param options Please refer to the [[SO]] object for a list of all supported options.
    */
-  case class Bind(handler: ActorRef,
-                  localAddress: InetSocketAddress,
-                  backlog: Int = 100,
-                  options: immutable.Traversable[SocketOption] = Nil) extends Command
+  final case class Bind(handler: ActorRef,
+                        localAddress: InetSocketAddress,
+                        backlog: Int = 100,
+                        options: immutable.Traversable[SocketOption] = Nil,
+                        pullMode: Boolean = false) extends Command
 
   /**
    * This message must be sent to a TCP connection actor after receiving the
@@ -163,7 +159,7 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
    *                notification until [[ResumeWriting]] is received. This can
    *                be used to implement NACK-based write backpressure.
    */
-  case class Register(handler: ActorRef, keepOpenOnPeerClosed: Boolean = false, useResumeWriting: Boolean = true) extends Command
+  final case class Register(handler: ActorRef, keepOpenOnPeerClosed: Boolean = false, useResumeWriting: Boolean = true) extends Command
 
   /**
    * In order to close down a listening socket, send this message to that socket’s
@@ -320,7 +316,7 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
    * or have been sent!</b> Unfortunately there is no way to determine whether
    * a particular write has been sent by the O/S.
    */
-  case class Write(data: ByteString, ack: Event) extends SimpleWriteCommand
+  final case class Write(data: ByteString, ack: Event) extends SimpleWriteCommand
   object Write {
     /**
      * The empty Write doesn't write anything and isn't acknowledged.
@@ -347,7 +343,7 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
    * or have been sent!</b> Unfortunately there is no way to determine whether
    * a particular write has been sent by the O/S.
    */
-  case class WriteFile(filePath: String, position: Long, count: Long, ack: Event) extends SimpleWriteCommand {
+  final case class WriteFile(filePath: String, position: Long, count: Long, ack: Event) extends SimpleWriteCommand {
     require(position >= 0, "WriteFile.position must be >= 0")
     require(count > 0, "WriteFile.count must be > 0")
   }
@@ -360,7 +356,7 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
    * If the sub commands contain `ack` requests they will be honored as soon as the
    * respective write has been written completely.
    */
-  case class CompoundWrite(override val head: SimpleWriteCommand, tailCommand: WriteCommand) extends WriteCommand
+  final case class CompoundWrite(override val head: SimpleWriteCommand, tailCommand: WriteCommand) extends WriteCommand
     with immutable.Iterable[SimpleWriteCommand] {
 
     def iterator: Iterator[SimpleWriteCommand] =
@@ -398,6 +394,13 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
    */
   case object ResumeReading extends Command
 
+  /**
+   * This message enables the accepting of the next connection if read throttling is enabled
+   * for connection actors.
+   * @param batchSize The number of connections to accept before waiting for the next resume command
+   */
+  final case class ResumeAccepting(batchSize: Int) extends Command
+
   /// EVENTS
   /**
    * Common interface for all events generated by the TCP layer actors.
@@ -408,7 +411,7 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
    * Whenever data are read from a socket they will be transferred within this
    * class to the handler actor which was designated in the [[Register]] message.
    */
-  case class Received(data: ByteString) extends Event
+  final case class Received(data: ByteString) extends Event
 
   /**
    * The connection actor sends this message either to the sender of a [[Connect]]
@@ -416,13 +419,13 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
    * in the [[Bind]] message. The connection is characterized by the `remoteAddress`
    * and `localAddress` TCP endpoints.
    */
-  case class Connected(remoteAddress: InetSocketAddress, localAddress: InetSocketAddress) extends Event
+  final case class Connected(remoteAddress: InetSocketAddress, localAddress: InetSocketAddress) extends Event
 
   /**
    * Whenever a command cannot be completed, the queried actor will reply with
    * this message, wrapping the original command which failed.
    */
-  case class CommandFailed(cmd: Command) extends Event
+  final case class CommandFailed(cmd: Command) extends Event
 
   /**
    * When `useResumeWriting` is in effect as indicated in the [[Register]] message,
@@ -439,7 +442,7 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
    * in this form. If the bind address indicated a 0 port number, then the contained
    * `localAddress` can be used to find out which port was automatically assigned.
    */
-  case class Bound(localAddress: InetSocketAddress) extends Event
+  final case class Bound(localAddress: InetSocketAddress) extends Event
 
   /**
    * The sender of an [[Unbind]] command will receive confirmation through this
@@ -504,7 +507,7 @@ object Tcp extends ExtensionId[TcpExt] with ExtensionIdProvider {
   /**
    * The connection has been closed due to an IO error.
    */
-  case class ErrorClosed(cause: String) extends ConnectionClosed {
+  final case class ErrorClosed(cause: String) extends ConnectionClosed {
     override def isErrorClosed = true
     override def getErrorCause = cause
   }
@@ -514,6 +517,7 @@ class TcpExt(system: ExtendedActorSystem) extends IO.Extension {
 
   val Settings = new Settings(system.settings.config.getConfig("akka.io.tcp"))
   class Settings private[TcpExt] (_config: Config) extends SelectionHandlerSettings(_config) {
+    import akka.util.Helpers.ConfigOps
     import _config._
 
     val NrOfSelectors: Int = getInt("nr-of-selectors") requiring (_ > 0, "nr-of-selectors must be > 0")
@@ -523,7 +527,7 @@ class TcpExt(system: ExtendedActorSystem) extends IO.Extension {
     val MaxDirectBufferPoolSize: Int = getInt("direct-buffer-pool-limit")
     val RegisterTimeout: Duration = getString("register-timeout") match {
       case "infinite" ⇒ Duration.Undefined
-      case x          ⇒ Duration(getMilliseconds("register-timeout"), MILLISECONDS)
+      case x          ⇒ _config.getMillisDuration("register-timeout")
     }
     val ReceivedMessageSizeLimit: Int = getString("max-received-message-size") match {
       case "unlimited" ⇒ Int.MaxValue
@@ -552,7 +556,7 @@ class TcpExt(system: ExtendedActorSystem) extends IO.Extension {
    *
    */
   val manager: ActorRef = {
-    system.asInstanceOf[ActorSystemImpl].systemActorOf(
+    system.systemActorOf(
       props = Props(classOf[TcpManager], this).withDispatcher(Settings.ManagementDispatcher).withDeploy(Deploy.local),
       name = "IO-TCP")
   }
@@ -613,35 +617,19 @@ object TcpMessage {
    * @param localAddress optionally specifies a specific address to bind to
    * @param options Please refer to [[TcpSO]] for a list of all supported options.
    * @param timeout is the desired connection timeout, `null` means "no timeout"
+   * @param pullMode enables pull based reading from the connection
    */
   def connect(remoteAddress: InetSocketAddress,
               localAddress: InetSocketAddress,
               options: JIterable[SocketOption],
-              timeout: FiniteDuration): Command = Connect(remoteAddress, Option(localAddress), options, Option(timeout))
+              timeout: FiniteDuration,
+              pullMode: Boolean): Command = Connect(remoteAddress, Option(localAddress), options, Option(timeout), pullMode)
 
-  /**
-   * Connect to the given `remoteAddress` with an optional `localAddress` to bind to given the specified Socket Options
-   */
-  def connect(remoteAddress: InetSocketAddress,
-              localAddress: InetSocketAddress,
-              options: JIterable[SocketOption]): Command = Connect(remoteAddress, Option(localAddress), options, None)
-
-  /**
-   * Connect to the given `remoteAddress` without binding to a local address.
-   */
-  def connect(remoteAddress: InetSocketAddress,
-              options: JIterable[SocketOption]): Command = Connect(remoteAddress, None, options, None)
   /**
    * Connect to the given `remoteAddress` without binding to a local address and without
    * specifying options.
    */
-  def connect(remoteAddress: InetSocketAddress): Command = Connect(remoteAddress, None, Nil, None)
-
-  /**
-   * Connect to the given `remoteAddress` with a connection `timeout` without binding to a local address and without
-   * specifying options.
-   */
-  def connect(remoteAddress: InetSocketAddress, timeout: FiniteDuration): Command = Connect(remoteAddress, None, Nil, Option(timeout))
+  def connect(remoteAddress: InetSocketAddress): Command = Connect(remoteAddress, None, Nil, None, pullMode = false)
 
   /**
    * The Bind message is send to the TCP manager actor, which is obtained via
@@ -661,11 +649,15 @@ object TcpMessage {
    *                kernel will hold for this port before refusing connections.
    *
    * @param options Please refer to [[TcpSO]] for a list of all supported options.
+   *
+   * @param pullMode enables pull based accepting and of connections and pull
+   *                 based reading from the accepted connections.
    */
   def bind(handler: ActorRef,
            endpoint: InetSocketAddress,
            backlog: Int,
-           options: JIterable[SocketOption]): Command = Bind(handler, endpoint, backlog, options)
+           options: JIterable[SocketOption],
+           pullMode: Boolean): Command = Bind(handler, endpoint, backlog, options, pullMode)
   /**
    * Open a listening socket without specifying options.
    */
@@ -793,6 +785,13 @@ object TcpMessage {
    * command in order to resume reading from the socket.
    */
   def resumeReading: Command = ResumeReading
+
+  /**
+   * This message enables the accepting of the next connection if pull reading is enabled
+   * for connection actors.
+   * @param batchSize The number of connections to accept before waiting for the next resume command
+   */
+  def resumeAccepting(batchSize: Int): Command = ResumeAccepting(batchSize)
 
   implicit private def fromJava[T](coll: JIterable[T]): immutable.Traversable[T] = {
     akka.japi.Util.immutableSeq(coll)

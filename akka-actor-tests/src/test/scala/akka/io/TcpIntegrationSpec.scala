@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.io
@@ -78,7 +78,9 @@ class TcpIntegrationSpec extends AkkaSpec("""
       // a "random" endpoint hopefully unavailable
       val endpoint = new InetSocketAddress("10.226.182.48", 23825)
       connectCommander.send(IO(Tcp), Connect(endpoint))
-      connectCommander.expectNoMsg(1.second)
+      // expecting CommandFailed or no reply (within timeout)
+      val replies = connectCommander.receiveWhile(1.second) { case m: Connected ⇒ m }
+      replies should be(Nil)
     }
   }
 

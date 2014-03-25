@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -42,7 +42,7 @@ trait SchedulerSpec extends BeforeAndAfterEach with DefaultTimeout with Implicit
         def receive = {
           case Tick ⇒
             if (ticks < 3) {
-              sender ! Tock
+              sender() ! Tock
               ticks += 1
             }
         }
@@ -66,7 +66,7 @@ trait SchedulerSpec extends BeforeAndAfterEach with DefaultTimeout with Implicit
     }
 
     "stop continuous scheduling if the receiving actor has been terminated" taggedAs TimingTest in {
-      val actor = system.actorOf(Props(new Actor { def receive = { case x ⇒ sender ! x } }))
+      val actor = system.actorOf(Props(new Actor { def receive = { case x ⇒ sender() ! x } }))
 
       // run immediately and then every 100 milliseconds
       collectCancellable(system.scheduler.schedule(0 milliseconds, 100 milliseconds, actor, "msg"))
@@ -149,7 +149,7 @@ trait SchedulerSpec extends BeforeAndAfterEach with DefaultTimeout with Implicit
     "not be canceled if cancel is performed after execution" in {
       val latch = TestLatch(1)
       val task = collectCancellable(system.scheduler.scheduleOnce(10 millis)(latch.countDown()))
-      Await.ready(latch, remaining)
+      Await.ready(latch, remainingOrDefault)
       task.cancel() should be(false)
       task.isCancelled should be(false)
       task.cancel() should be(false)
@@ -192,7 +192,7 @@ trait SchedulerSpec extends BeforeAndAfterEach with DefaultTimeout with Implicit
     "never fire prematurely" taggedAs TimingTest in {
       val ticks = new TestLatch(300)
 
-      case class Msg(ts: Long)
+      final case class Msg(ts: Long)
 
       val actor = system.actorOf(Props(new Actor {
         def receive = {
@@ -482,7 +482,7 @@ class LightArrayRevolverSchedulerSpec extends AkkaSpec(SchedulerSpec.testConfRev
         val s = success.size
         s should be < cap
         awaitCond(s == counter.get, message = s"$s was not ${counter.get}")
-        failure.size should equal(headroom)
+        failure.size should be(headroom)
       }
     }
   }
@@ -512,7 +512,8 @@ class LightArrayRevolverSchedulerSpec extends AkkaSpec(SchedulerSpec.testConfRev
           // println(s"clock=$time")
           time
         }
-        override protected def getShutdownTimeout: FiniteDuration = super.getShutdownTimeout.dilated
+
+        override protected def getShutdownTimeout: FiniteDuration = (10 seconds).dilated
 
         override protected def waitNanos(ns: Long): Unit = {
           // println(s"waiting $ns")

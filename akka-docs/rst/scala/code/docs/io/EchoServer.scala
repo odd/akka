@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package docs.io
@@ -56,15 +56,15 @@ class EchoManager(handlerClass: Class[_]) extends Actor with ActorLogging {
     case Bound(localAddress) =>
       log.info("listening on port {}", localAddress.getPort)
 
-    case CommandFailed(Bind(_, local, _, _)) =>
+    case CommandFailed(Bind(_, local, _, _, _)) =>
       log.warning(s"cannot bind to [$local]")
       context stop self
 
     //#echo-manager
     case Connected(remote, local) =>
       log.info("received connection from {}", remote)
-      val handler = context.actorOf(Props(handlerClass, sender, remote))
-      sender ! Register(handler, keepOpenOnPeerClosed = true)
+      val handler = context.actorOf(Props(handlerClass, sender(), remote))
+      sender() ! Register(handler, keepOpenOnPeerClosed = true)
     //#echo-manager
   }
 
@@ -81,7 +81,7 @@ class EchoHandler(connection: ActorRef, remote: InetSocketAddress)
 
   import Tcp._
 
-  case class Ack(offset: Int) extends Event
+  final case class Ack(offset: Int) extends Event
 
   // sign death pact: this actor terminates when connection breaks
   context watch connection

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.util
@@ -11,7 +11,7 @@ private[akka] object WildcardTree {
   private val empty = new WildcardTree[Nothing]()
   def apply[T](): WildcardTree[T] = empty.asInstanceOf[WildcardTree[T]]
 }
-private[akka] case class WildcardTree[T](data: Option[T] = None, children: Map[String, WildcardTree[T]] = HashMap[String, WildcardTree[T]]()) {
+private[akka] final case class WildcardTree[T](data: Option[T] = None, children: Map[String, WildcardTree[T]] = HashMap[String, WildcardTree[T]]()) {
 
   def insert(elems: Iterator[String], d: T): WildcardTree[T] =
     if (!elems.hasNext) {

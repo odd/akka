@@ -19,7 +19,7 @@ Akka uses the `Typesafe Config Library
 for the configuration of your own application or library built with or without
 Akka. This library is implemented in Java with no external dependencies; you
 should have a look at its documentation (in particular about `ConfigFactory
-<http://typesafehub.github.com/config/latest/api/com/typesafe/config/ConfigFactory.html>`_),
+<http://typesafehub.github.io/config/v1.2.0/com/typesafe/config/ConfigFactory.html>`_),
 which is only summarized in the following.
 
 .. warning::
@@ -79,6 +79,51 @@ When using JarJar, OneJar, Assembly or any jar-bundler
     that if you put/merge multiple jars into the same jar, you need to merge all the
     reference.confs as well. Otherwise all defaults will be lost and Akka will not function.
 
+
+If you are using Maven to package your application, you can also make use of
+the `Apache Maven Shade Plugin
+<http://maven.apache.org/plugins/maven-shade-plugin>`_ support for `Resource
+Transformers
+<http://maven.apache.org/plugins/maven-shade-plugin/examples/resource-transformers.html#AppendingTransformer>`_
+to merge all the reference.confs on the build classpath into one. 
+
+The plugin configuration might look like this::
+
+    <plugin>
+     <groupId>org.apache.maven.plugins</groupId>
+     <artifactId>maven-shade-plugin</artifactId>
+     <version>1.5</version>
+     <executions>
+      <execution>
+       <phase>package</phase>
+       <goals>
+        <goal>shade</goal>
+       </goals>
+       <configuration>
+        <shadedArtifactAttached>true</shadedArtifactAttached>
+        <shadedClassifierName>allinone</shadedClassifierName>
+        <artifactSet>
+         <includes>
+          <include>*:*</include>
+         </includes>
+        </artifactSet>
+        <transformers>
+          <transformer
+           implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+           <resource>reference.conf</resource>
+          </transformer>
+          <transformer
+           implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+           <manifestEntries>
+            <Main-Class>akka.Main</Main-Class>
+           </manifestEntries>
+          </transformer>
+        </transformers>
+       </configuration>
+      </execution>
+     </executions>
+    </plugin>
+
 Custom application.conf
 -----------------------
 
@@ -98,11 +143,14 @@ A custom ``application.conf`` might look like this::
     # Options: OFF, ERROR, WARNING, INFO, DEBUG
     loglevel = "DEBUG"
 
-    # Log level for the very basic logger activated during AkkaApplication startup
+    # Log level for the very basic logger activated during ActorSystem startup.
+    # This logger prints the log messages to stdout (System.out).
     # Options: OFF, ERROR, WARNING, INFO, DEBUG
     stdout-loglevel = "DEBUG"
 
     actor {
+      provider = "akka.cluster.ClusterActorRefProvider"
+      
       default-dispatcher {
         # Throughput for default Dispatcher, set to 1 for as fair as possible
         throughput = 10
@@ -110,10 +158,8 @@ A custom ``application.conf`` might look like this::
     }
 
     remote {
-      server {
-        # The port clients should connect to. Default is 2552 (AKKA)
-        port = 2562
-      }
+      # The port clients should connect to. Default is 2552.
+      netty.tcp.port = 4711
     }
   }
 
@@ -344,10 +390,33 @@ Includes at the top of ``application.conf`` will be overridden by
 the rest of ``application.conf``, while those at the bottom will
 override the earlier stuff.
 
+Actor Deployment Configuration
+------------------------------
+
+Deployment settings for specific actors can be defined in the ``akka.actor.deployment``
+section of the configuration. In the deployment section it is possible to define
+things like dispatcher, mailbox, router settings, and remote deployment.
+Configuration of these features are described in the chapters detailing corresponding
+topics. An example may look like this:
+
+.. includecode:: code/docs/config/ConfigDocSpec.scala#deployment-section
+
+The deployment section for a specific actor is identified by the 
+path of the actor relative to ``/user``.
+
+You can use asterisks as wildcard matches for the actor path sections, so you could specify:
+``/*/sampleActor`` and that would match all ``sampleActor`` on that level in the hierarchy.
+You can also use wildcard in the last position to match all actors at a certain level:
+``/someParent/*``. Non-wildcard matches always have higher priority to match than wildcards, so:
+``/foo/bar`` is considered **more specific** than ``/foo/*`` and only the highest priority match is used.
+Please note that it **cannot** be used to partially match section, like this: ``/foo*/bar``, ``/f*o/bar`` etc.
+
 Listing of the Reference Configuration
 --------------------------------------
 
 Each Akka module has a reference configuration file with the default values.
+
+.. _config-akka-actor:
 
 akka-actor
 ~~~~~~~~~~
@@ -355,29 +424,7 @@ akka-actor
 .. literalinclude:: ../../../akka-actor/src/main/resources/reference.conf
    :language: none
 
-akka-remote
-~~~~~~~~~~~
-
-.. literalinclude:: ../../../akka-remote/src/main/resources/reference.conf
-   :language: none
-
-akka-testkit
-~~~~~~~~~~~~
-
-.. literalinclude:: ../../../akka-testkit/src/main/resources/reference.conf
-   :language: none
-
-akka-camel
-~~~~~~~~~~
-
-.. literalinclude:: ../../../akka-camel/src/main/resources/reference.conf
-   :language: none
-
-akka-cluster
-~~~~~~~~~~~~
-
-.. literalinclude:: ../../../akka-cluster/src/main/resources/reference.conf
-   :language: none
+.. _config-akka-agent:
 
 akka-agent
 ~~~~~~~~~~
@@ -385,11 +432,55 @@ akka-agent
 .. literalinclude:: ../../../akka-agent/src/main/resources/reference.conf
    :language: none
 
+.. _config-akka-camel:
+
+akka-camel
+~~~~~~~~~~
+
+.. literalinclude:: ../../../akka-camel/src/main/resources/reference.conf
+   :language: none
+
+.. _config-akka-cluster:
+
+akka-cluster
+~~~~~~~~~~~~
+
+.. literalinclude:: ../../../akka-cluster/src/main/resources/reference.conf
+   :language: none
+
+.. _config-akka-multi-node-testkit:
+
+akka-multi-node-testkit
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../akka-multi-node-testkit/src/main/resources/reference.conf
+   :language: none
+
+.. _config-akka-persistence:
+
 akka-persistence
 ~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../akka-persistence/src/main/resources/reference.conf
    :language: none
+
+.. _config-akka-remote:
+
+akka-remote
+~~~~~~~~~~~
+
+.. literalinclude:: ../../../akka-remote/src/main/resources/reference.conf
+   :language: none
+
+.. _config-akka-testkit:
+
+akka-testkit
+~~~~~~~~~~~~
+
+.. literalinclude:: ../../../akka-testkit/src/main/resources/reference.conf
+   :language: none
+
+.. _config-akka-zeromq:
 
 akka-zeromq
 ~~~~~~~~~~~

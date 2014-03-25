@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.cluster
 
@@ -20,6 +20,7 @@ import akka.actor.ExtendedActorSystem
 import akka.remote.RemoteActorRefProvider
 import akka.actor.ActorRef
 import akka.dispatch.sysmsg.Failed
+import akka.actor.PoisonPill
 
 object SurviveNetworkInstabilityMultiJvmSpec extends MultiNodeConfig {
   val first = role("first")
@@ -43,16 +44,32 @@ object SurviveNetworkInstabilityMultiJvmSpec extends MultiNodeConfig {
 
   class Parent extends Actor {
     def receive = {
-      case p: Props ⇒ sender ! context.actorOf(p)
+      case p: Props ⇒ sender() ! context.actorOf(p)
     }
   }
 
   class RemoteChild extends Actor {
     import context.dispatcher
-    context.system.scheduler.scheduleOnce(500.millis, self, "boom")
+
     def receive = {
+      case "hello" ⇒
+        context.actorSelection("/user/bad") ! self
+        sender() ! "hello"
       case "boom" ⇒ throw new SimulatedException
-      case x      ⇒ sender ! x
+    }
+  }
+
+  class BadGuy extends Actor {
+    var victims = Vector.empty[ActorRef]
+    def receive = {
+      case ref: ActorRef ⇒ victims :+= ref
+      case "boom"        ⇒ victims foreach { _ ! "boom" }
+    }
+  }
+
+  class Echo extends Actor {
+    def receive = {
+      case m ⇒ sender ! m
     }
   }
 
@@ -85,15 +102,40 @@ abstract class SurviveNetworkInstabilitySpec
     awaitAssert(clusterView.unreachableMembers.map(_.address) should be(expected))
   }
 
+  system.actorOf(Props[Echo], "echo")
+  val bad = system.actorOf(Props[BadGuy], "bad")
+
+  def assertCanTalk(alive: RoleName*): Unit = {
+    runOn(alive: _*) {
+      awaitAllReachable
+    }
+    enterBarrier("reachable-ok")
+
+    runOn(alive: _*) {
+      for (to ← alive) {
+        val sel = system.actorSelection(node(to) / "user" / "echo")
+        val msg = s"ping-$to"
+        val p = TestProbe()
+        awaitAssert {
+          sel.tell(msg, p.ref)
+          p.expectMsg(1.second, msg)
+        }
+        p.ref ! PoisonPill
+      }
+    }
+    enterBarrier("ping-ok")
+  }
+
   "A network partition tolerant cluster" must {
 
     "reach initial convergence" taggedAs LongRunningTest in {
       awaitClusterUp(first, second, third, fourth, fifth)
 
       enterBarrier("after-1")
+      assertCanTalk(first, second, third, fourth, fifth)
     }
 
-    "heal after a broken pair" taggedAs LongRunningTest in within(30.seconds) {
+    "heal after a broken pair" taggedAs LongRunningTest in within(45.seconds) {
       runOn(first) {
         testConductor.blackhole(first, second, Direction.Both).await
       }
@@ -117,11 +159,11 @@ abstract class SurviveNetworkInstabilitySpec
       // unreachable they must accept gossip from first and second when their
       // broken connection has healed, otherwise they will be isolated forever.
 
-      awaitAllReachable()
       enterBarrier("after-2")
+      assertCanTalk(first, second, third, fourth, fifth)
     }
 
-    "heal after one isolated node" taggedAs LongRunningTest in within(30.seconds) {
+    "heal after one isolated node" taggedAs LongRunningTest in within(45.seconds) {
       val others = Vector(second, third, fourth, fifth)
       runOn(first) {
         for (other ← others) {
@@ -143,11 +185,10 @@ abstract class SurviveNetworkInstabilitySpec
         }
       }
       enterBarrier("repair-3")
-      awaitAllReachable()
-      enterBarrier("after-3")
+      assertCanTalk((others :+ first): _*)
     }
 
-    "heal two isolated islands" taggedAs LongRunningTest in within(30.seconds) {
+    "heal two isolated islands" taggedAs LongRunningTest in within(45.seconds) {
       val island1 = Vector(first, second)
       val island2 = Vector(third, fourth, fifth)
       runOn(first) {
@@ -173,11 +214,10 @@ abstract class SurviveNetworkInstabilitySpec
         }
       }
       enterBarrier("repair-4")
-      awaitAllReachable()
-      enterBarrier("after-4")
+      assertCanTalk((island1 ++ island2): _*)
     }
 
-    "heal after unreachable when ring is changed" taggedAs LongRunningTest in within(45.seconds) {
+    "heal after unreachable when ring is changed" taggedAs LongRunningTest in within(60.seconds) {
       val joining = Vector(sixth, seventh)
       val others = Vector(second, third, fourth, fifth)
       runOn(first) {
@@ -214,15 +254,15 @@ abstract class SurviveNetworkInstabilitySpec
       }
 
       enterBarrier("repair-5")
-      runOn((joining ++ others): _*) {
-        awaitAllReachable()
+      runOn((joining ++ others :+ first): _*) {
         // eighth not joined yet
-        awaitMembersUp(roles.size - 1)
+        awaitMembersUp(roles.size - 1, timeout = remaining)
       }
       enterBarrier("after-5")
+      assertCanTalk((joining ++ others :+ first): _*)
     }
 
-    "down and remove quarantined node" taggedAs LongRunningTest in within(45.seconds) {
+    "down and remove quarantined node" taggedAs LongRunningTest in within(60.seconds) {
       val others = Vector(first, third, fourth, fifth, sixth, seventh)
 
       runOn(second) {
@@ -233,7 +273,10 @@ abstract class SurviveNetworkInstabilitySpec
         for (_ ← 1 to sysMsgBufferSize + 1) {
           // remote deployment to third
           parent ! Props[RemoteChild]
-          val child = expectMsgType[ActorRef]
+          val child = receiveOne(remainingOrDefault) match {
+            case a: ActorRef ⇒ a
+            case other       ⇒ fail(s"expected ActorRef, got $other")
+          }
           child ! "hello"
           expectMsg("hello")
           lastSender.path.address should be(address(third))
@@ -250,12 +293,15 @@ abstract class SurviveNetworkInstabilitySpec
 
       runOn(first) {
         for (role ← others)
-          testConductor.blackhole(second, role, Direction.Send).await
+          testConductor.blackhole(role, second, Direction.Both).await
       }
       enterBarrier("blackhole-6")
 
       runOn(third) {
-        // undelivered system messages in RemoteChild on third should trigger QuarantinedEvent
+        // this will trigger Exception in RemoteChild on third, and the failures
+        // can't be reported to parent on second, resulting in too many outstanding
+        // system messages and quarantine
+        bad ! "boom"
         within(10.seconds) {
           expectMsgType[QuarantinedEvent].address should be(address(second))
         }
@@ -269,9 +315,10 @@ abstract class SurviveNetworkInstabilitySpec
       }
 
       enterBarrier("after-6")
+      assertCanTalk(others: _*)
     }
 
-    "continue and move Joining to Up after downing of one half" taggedAs LongRunningTest in within(45.seconds) {
+    "continue and move Joining to Up after downing of one half" taggedAs LongRunningTest in within(60.seconds) {
       // note that second is already removed in previous step
       val side1 = Vector(first, third, fourth)
       val side1AfterJoin = side1 :+ eighth
@@ -331,6 +378,7 @@ abstract class SurviveNetworkInstabilitySpec
       }
 
       enterBarrier("after-7")
+      assertCanTalk((side1AfterJoin): _*)
     }
 
   }

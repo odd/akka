@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.persistence
@@ -124,8 +124,8 @@ object ProcessorSpec {
     override def receive = failOnReplayedA orElse super.receive
   }
 
-  case class Delete1(snr: Long)
-  case class DeleteN(toSnr: Long)
+  final case class Delete1(snr: Long)
+  final case class DeleteN(toSnr: Long)
 
   class DeleteMessageTestProcessor(name: String) extends RecoverTestProcessor(name) {
     override def receive = {
@@ -147,7 +147,7 @@ abstract class ProcessorSpec(config: Config) extends AkkaSpec(config) with Persi
     processor ! Persistent("a")
     processor ! Persistent("b")
     processor ! GetState
-    expectMsg(5.seconds, List("a-1", "b-2"))
+    expectMsg(List("a-1", "b-2"))
   }
 
   "A processor" must {
@@ -304,14 +304,14 @@ abstract class ProcessorSpec(config: Config) extends AkkaSpec(config) with Persi
     "support single message deletions" in {
       val deleteProbe = TestProbe()
 
-      system.eventStream.subscribe(deleteProbe.ref, classOf[Delete])
+      system.eventStream.subscribe(deleteProbe.ref, classOf[DeleteMessages])
 
       val processor1 = namedProcessor[DeleteMessageTestProcessor]
       processor1 ! Persistent("c")
       processor1 ! Persistent("d")
       processor1 ! Persistent("e")
       processor1 ! Delete1(4)
-      deleteProbe.expectMsgType[Delete]
+      deleteProbe.expectMsgType[DeleteMessages]
 
       val processor2 = namedProcessor[DeleteMessageTestProcessor]
       processor2 ! GetState
@@ -321,19 +321,29 @@ abstract class ProcessorSpec(config: Config) extends AkkaSpec(config) with Persi
     "support bulk message deletions" in {
       val deleteProbe = TestProbe()
 
-      system.eventStream.subscribe(deleteProbe.ref, classOf[Delete])
+      system.eventStream.subscribe(deleteProbe.ref, classOf[DeleteMessagesTo])
 
       val processor1 = namedProcessor[DeleteMessageTestProcessor]
       processor1 ! Persistent("c")
       processor1 ! Persistent("d")
       processor1 ! Persistent("e")
       processor1 ! DeleteN(4)
-      deleteProbe.expectMsgType[Delete]
+      deleteProbe.expectMsgType[DeleteMessagesTo]
 
       val processor2 = namedProcessor[DeleteMessageTestProcessor]
       processor2 ! GetState
 
       expectMsg(List("e-5"))
+
+      processor2 ! Persistent("f")
+      processor2 ! Persistent("g")
+      processor2 ! DeleteN(6)
+      deleteProbe.expectMsgType[DeleteMessagesTo]
+
+      val processor3 = namedProcessor[DeleteMessageTestProcessor]
+      processor3 ! GetState
+
+      expectMsg(List("g-7"))
     }
   }
 

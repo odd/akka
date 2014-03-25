@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.remote
@@ -20,6 +20,9 @@ import akka.actor.SelectChildPattern
 import akka.actor.Identify
 import akka.actor.ActorIdentity
 import akka.actor.EmptyLocalActorRef
+import akka.event.AddressTerminatedTopic
+import java.util.concurrent.ConcurrentHashMap
+import akka.dispatch.sysmsg.Unwatch
 
 /**
  * INTERNAL API
@@ -30,7 +33,7 @@ private[akka] sealed trait DaemonMsg
  * INTERNAL API
  */
 @SerialVersionUID(1L)
-private[akka] case class DaemonMsgCreate(props: Props, deploy: Deploy, path: String, supervisor: ActorRef) extends DaemonMsg
+private[akka] final case class DaemonMsgCreate(props: Props, deploy: Deploy, path: String, supervisor: ActorRef) extends DaemonMsg
 
 /**
  * INTERNAL API
@@ -52,7 +55,34 @@ private[akka] class RemoteSystemDaemon(
 
   private val terminating = new Switch(false)
 
-  system.eventStream.subscribe(this, classOf[AddressTerminated])
+  AddressTerminatedTopic(system).subscribe(this)
+
+  private val parent2children = new ConcurrentHashMap[ActorRef, Set[ActorRef]]
+
+  @tailrec private def addChildParentNeedsWatch(parent: ActorRef, child: ActorRef): Boolean =
+    parent2children.get(parent) match {
+      case null ⇒
+        if (parent2children.putIfAbsent(parent, Set(child)) == null) true
+        else addChildParentNeedsWatch(parent, child)
+      case children ⇒
+        if (parent2children.replace(parent, children, children + child)) false
+        else addChildParentNeedsWatch(parent, child)
+    }
+
+  @tailrec private def removeChildParentNeedsUnwatch(parent: ActorRef, child: ActorRef): Boolean = {
+    parent2children.get(parent) match {
+      case null ⇒ false // no-op
+      case children ⇒
+        val next = children - child
+        if (next.isEmpty) {
+          if (!parent2children.remove(parent, children)) removeChildParentNeedsUnwatch(parent, child)
+          else true
+        } else {
+          if (!parent2children.replace(parent, children, next)) removeChildParentNeedsUnwatch(parent, child)
+          else false
+        }
+    }
+  }
 
   /**
    * Find the longest matching path which we know about and return that ref
@@ -86,7 +116,21 @@ private[akka] class RemoteSystemDaemon(
     case DeathWatchNotification(child: ActorRefWithCell with ActorRefScope, _, _) if child.isLocal ⇒
       terminating.locked {
         removeChild(child.path.elements.drop(1).mkString("/"), child)
+        val parent = child.getParent
+        if (removeChildParentNeedsUnwatch(parent, child)) parent.sendSystemMessage(Unwatch(parent, this))
         terminationHookDoneWhenNoChildren()
+      }
+    case DeathWatchNotification(parent: ActorRef with ActorRefScope, _, _) if !parent.isLocal ⇒
+      terminating.locked {
+        parent2children.remove(parent) match {
+          case null ⇒
+          case children ⇒
+            for (c ← children) {
+              system.stop(c)
+              removeChild(c.path.elements.drop(1).mkString("/"), c)
+            }
+            terminationHookDoneWhenNoChildren()
+        }
       }
     case _ ⇒ super.sendSystemMessage(message)
   }
@@ -110,11 +154,13 @@ private[akka] class RemoteSystemDaemon(
                 else s.substring(0, i)
               }
               val isTerminating = !terminating.whileOff {
-                val actor = system.provider.actorOf(system, props, supervisor.asInstanceOf[InternalActorRef],
+                val parent = supervisor.asInstanceOf[InternalActorRef]
+                val actor = system.provider.actorOf(system, props, parent,
                   p, systemService = false, Some(deploy), lookupDeploy = true, async = false)
                 addChild(childName, actor)
                 actor.sendSystemMessage(Watch(actor, this))
                 actor.start()
+                if (addChildParentNeedsWatch(parent, actor)) parent.sendSystemMessage(Watch(parent, this))
               }
               if (isTerminating) log.error("Skipping [{}] to RemoteSystemDaemon on [{}] while terminating", message, p.address)
             case _ ⇒

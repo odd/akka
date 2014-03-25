@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package docs.testkit
 
@@ -16,7 +16,7 @@ import akka.testkit.ImplicitSender
 object MySpec {
   class EchoActor extends Actor {
     def receive = {
-      case x => sender ! x
+      case x => sender() ! x
     }
   }
 }

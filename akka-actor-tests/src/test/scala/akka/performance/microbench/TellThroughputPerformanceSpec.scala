@@ -1,5 +1,6 @@
 package akka.performance.microbench
 
+import language.postfixOps
 import akka.performance.workbench.PerformanceSpec
 import akka.actor._
 import java.util.concurrent.{ ThreadPoolExecutor, CountDownLatch, TimeUnit }
@@ -141,13 +142,13 @@ object TellThroughputPerformanceSpec {
 
   class Destination1 extends Actor {
     def receive = {
-      case Msg ⇒ sender ! Msg
+      case Msg ⇒ sender() ! Msg
     }
   }
 
   class Destination2 extends Actor {
     def receive = {
-      case Msg ⇒ sender ! Msg
+      case Msg ⇒ sender() ! Msg
     }
   }
 

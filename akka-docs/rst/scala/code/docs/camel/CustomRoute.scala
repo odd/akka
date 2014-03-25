@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package docs.camel
@@ -19,7 +19,7 @@ object CustomRoute {
     class Responder extends Actor {
       def receive = {
         case msg: CamelMessage =>
-          sender ! (msg.mapBody {
+          sender() ! (msg.mapBody {
             body: String => "received %s" format body
           })
       }
@@ -53,7 +53,7 @@ object CustomRoute {
         handled(true).transform(Builder.exceptionMessage).end
 
       final override def preRestart(reason: Throwable, message: Option[Any]) {
-        sender ! Failure(reason)
+        sender() ! Failure(reason)
       }
     }
     //#ErrorThrowingConsumer

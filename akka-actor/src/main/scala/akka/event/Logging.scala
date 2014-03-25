@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.event
 
@@ -408,7 +408,7 @@ object Logging {
   /**
    * Marker trait for annotating LogLevel, which must be Int after erasure.
    */
-  case class LogLevel(asInt: Int) extends AnyVal {
+  final case class LogLevel(asInt: Int) extends AnyVal {
     @inline final def >=(other: LogLevel): Boolean = asInt >= other.asInt
     @inline final def <=(other: LogLevel): Boolean = asInt <= other.asInt
     @inline final def >(other: LogLevel): Boolean = asInt > other.asInt
@@ -684,7 +684,7 @@ object Logging {
    * message. This is necessary to ensure that additional subscriptions are in
    * effect when the logging system finished starting.
    */
-  case class InitializeLogger(bus: LoggingBus) extends NoSerializationVerificationNeeded
+  final case class InitializeLogger(bus: LoggingBus) extends NoSerializationVerificationNeeded
 
   /**
    * Response message each logger must send within 1 second after receiving the
@@ -793,7 +793,7 @@ object Logging {
    */
   class DefaultLogger extends Actor with StdOutLogger {
     override def receive: Receive = {
-      case InitializeLogger(_) ⇒ sender ! LoggerInitialized
+      case InitializeLogger(_) ⇒ sender() ! LoggerInitialized
       case event: LogEvent     ⇒ print(event)
     }
   }

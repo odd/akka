@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -27,13 +27,13 @@ object DeathWatchSpec {
    * Forwarding `Terminated` to non-watching testActor is not possible,
    * and therefore the `Terminated` message is wrapped.
    */
-  case class WrappedTerminated(t: Terminated)
+  final case class WrappedTerminated(t: Terminated)
 
-  case class W(ref: ActorRef)
-  case class U(ref: ActorRef)
-  case class FF(fail: Failed)
+  final case class W(ref: ActorRef)
+  final case class U(ref: ActorRef)
+  final case class FF(fail: Failed)
 
-  case class Latches(t1: TestLatch, t2: TestLatch) extends NoSerializationVerificationNeeded
+  final case class Latches(t1: TestLatch, t2: TestLatch) extends NoSerializationVerificationNeeded
 }
 
 trait DeathWatchSpec { this: AkkaSpec with ImplicitSender with DefaultTimeout ⇒
@@ -90,7 +90,7 @@ trait DeathWatchSpec { this: AkkaSpec with ImplicitSender with DefaultTimeout �
         context.watch(terminal)
         context.unwatch(terminal)
         def receive = {
-          case "ping"        ⇒ sender ! "pong"
+          case "ping"        ⇒ sender() ! "pong"
           case t: Terminated ⇒ testActor ! WrappedTerminated(t)
         }
       }).withDeploy(Deploy.local))
@@ -113,18 +113,18 @@ trait DeathWatchSpec { this: AkkaSpec with ImplicitSender with DefaultTimeout �
       filterException[ActorKilledException] {
         val supervisor = system.actorOf(Props(new Supervisor(
           OneForOneStrategy(maxNrOfRetries = 2)(List(classOf[Exception])))))
-        val terminalProps = Props(new Actor { def receive = { case x ⇒ sender ! x } })
+        val terminalProps = Props(new Actor { def receive = { case x ⇒ sender() ! x } })
         val terminal = Await.result((supervisor ? terminalProps).mapTo[ActorRef], timeout.duration)
 
         val monitor = startWatching(terminal)
 
         terminal ! Kill
         terminal ! Kill
-        Await.result(terminal ? "foo", timeout.duration) should equal("foo")
+        Await.result(terminal ? "foo", timeout.duration) should be("foo")
         terminal ! Kill
 
         expectTerminationOf(terminal)
-        terminal.isTerminated should equal(true)
+        terminal.isTerminated should be(true)
 
         system.stop(supervisor)
       }

@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.contrib.pattern
 
@@ -25,15 +25,15 @@ case object Checking extends AccountType
 case object Savings extends AccountType
 case object MoneyMarket extends AccountType
 
-case class GetCustomerAccountBalances(id: Long, accountTypes: Set[AccountType])
-case class GetAccountBalances(id: Long)
+final case class GetCustomerAccountBalances(id: Long, accountTypes: Set[AccountType])
+final case class GetAccountBalances(id: Long)
 
-case class AccountBalances(accountType: AccountType,
-                           balance: Option[List[(Long, BigDecimal)]])
+final case class AccountBalances(accountType: AccountType,
+                                 balance: Option[List[(Long, BigDecimal)]])
 
-case class CheckingAccountBalances(balances: Option[List[(Long, BigDecimal)]])
-case class SavingsAccountBalances(balances: Option[List[(Long, BigDecimal)]])
-case class MoneyMarketAccountBalances(balances: Option[List[(Long, BigDecimal)]])
+final case class CheckingAccountBalances(balances: Option[List[(Long, BigDecimal)]])
+final case class SavingsAccountBalances(balances: Option[List[(Long, BigDecimal)]])
+final case class MoneyMarketAccountBalances(balances: Option[List[(Long, BigDecimal)]])
 
 case object TimedOut
 case object CantUnderstand
@@ -41,19 +41,19 @@ case object CantUnderstand
 class SavingsAccountProxy extends Actor {
   def receive = {
     case GetAccountBalances(id: Long) ⇒
-      sender ! SavingsAccountBalances(Some(List((1, 150000), (2, 29000))))
+      sender() ! SavingsAccountBalances(Some(List((1, 150000), (2, 29000))))
   }
 }
 class CheckingAccountProxy extends Actor {
   def receive = {
     case GetAccountBalances(id: Long) ⇒
-      sender ! CheckingAccountBalances(Some(List((3, 15000))))
+      sender() ! CheckingAccountBalances(Some(List((3, 15000))))
   }
 }
 class MoneyMarketAccountProxy extends Actor {
   def receive = {
     case GetAccountBalances(id: Long) ⇒
-      sender ! MoneyMarketAccountBalances(None)
+      sender() ! MoneyMarketAccountBalances(None)
   }
 }
 
@@ -64,9 +64,9 @@ class AccountBalanceRetriever extends Actor with Aggregator {
   //#initial-expect
   expectOnce {
     case GetCustomerAccountBalances(id, types) ⇒
-      new AccountAggregator(sender, id, types)
+      new AccountAggregator(sender(), id, types)
     case _ ⇒
-      sender ! CantUnderstand
+      sender() ! CantUnderstand
       context.stop(self)
   }
   //#initial-expect
@@ -132,11 +132,11 @@ class AccountBalanceRetriever extends Actor with Aggregator {
 //#demo-code
 
 //#chain-sample
-case class InitialRequest(name: String)
-case class Request(name: String)
-case class Response(name: String, value: String)
-case class EvaluationResults(name: String, eval: List[Int])
-case class FinalResponse(qualifiedValues: List[String])
+final case class InitialRequest(name: String)
+final case class Request(name: String)
+final case class Response(name: String, value: String)
+final case class EvaluationResults(name: String, eval: List[Int])
+final case class FinalResponse(qualifiedValues: List[String])
 
 /**
  * An actor sample demonstrating use of unexpect and chaining.
@@ -145,7 +145,7 @@ case class FinalResponse(qualifiedValues: List[String])
 class ChainingSample extends Actor with Aggregator {
 
   expectOnce {
-    case InitialRequest(name) ⇒ new MultipleResponseHandler(sender, name)
+    case InitialRequest(name) ⇒ new MultipleResponseHandler(sender(), name)
   }
 
   class MultipleResponseHandler(originalSender: ActorRef, propName: String) {
@@ -211,7 +211,7 @@ class AggregatorSpec extends TestKit(ActorSystem("test")) with ImplicitSender wi
   }
 }
 
-case class TestEntry(id: Int)
+final case class TestEntry(id: Int)
 
 class WorkListSpec extends FunSuiteLike {
 

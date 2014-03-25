@@ -187,6 +187,8 @@ The routee actors are created externally from the router:
 The paths may contain protocol and address information for actors running on remote hosts.
 Remoting requires the ``akka-remote`` module to be included in the classpath.
 
+.. includecode:: ../scala/code/docs/routing/RouterDocSpec.scala#config-remote-round-robin-group
+
 Router usage
 ^^^^^^^^^^^^
 
@@ -252,6 +254,31 @@ RandomGroup defined in code:
 .. includecode:: code/docs/jrouting/RouterDocTest.java
    :include: paths,random-group-2
 
+.. _balancing-pool-java:
+
+BalancingPool
+-------------
+
+A Router that will try to redistribute work from busy routees to idle routees.
+All routees share the same mailbox.
+
+BalancingPool defined in configuration:
+
+.. includecode:: ../scala/code/docs/routing/RouterDocSpec.scala#config-balancing-pool
+
+.. includecode:: code/docs/jrouting/RouterDocTest.java#balancing-pool-1
+
+BalancingPool defined in code:
+
+.. includecode:: code/docs/jrouting/RouterDocTest.java#balancing-pool-2
+
+Addition configuration for the balancing dispatcher, which is used by the pool,
+can be configured in the ``pool-dispatcher`` section of the router deployment
+configuration.
+
+.. includecode:: ../scala/code/docs/routing/RouterDocSpec.scala#config-balancing-pool2
+
+There is no Group variant of the BalancingPool.
 
 SmallestMailboxPool
 -------------------
@@ -628,11 +655,7 @@ Configuring Dispatchers
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 The dispatcher for created children of the pool will be taken from
-``Props`` as described in :ref:`dispatchers-scala`. For a pool it
-makes sense to configure the ``BalancingDispatcher`` if the precise
-routing is not so important (i.e. no consistent hashing or round-robin is
-required); this enables newly created routees to pick up work immediately by
-stealing it from their siblings.
+``Props`` as described in :ref:`dispatchers-scala`.
 
 To make it easy to define the dispatcher of the routees of the pool you can
 define the dispatcher inline in the deployment section of the config.
@@ -641,7 +664,6 @@ define the dispatcher inline in the deployment section of the config.
 
 That is the only thing you need to do enable a dedicated dispatcher for a
 pool.
-
 
 .. note::
 
@@ -662,28 +684,6 @@ implement the method in a suitable way.
 .. note::
 
    It is not allowed to configure the ``routerDispatcher`` to be a
-   :class:`BalancingDispatcher` since the messages meant for the special
-   router actor cannot be processed by any other actor.
-
-At first glance there seems to be an overlap between the
-:class:`BalancingDispatcher` and Routers, but they complement each other.
-The balancing dispatcher is in charge of running the actors while the routers
-are in charge of deciding which message goes where. A router can also have
-children that span multiple actor systems, even remote ones, but a dispatcher
-lives inside a single actor system.
-
-When using a :class:`RoundRobinRouter` with a :class:`BalancingDispatcher`
-there are some configuration settings to take into account.
-
-- There can only be ``nr-of-instances`` messages being processed at the same
-  time no matter how many threads are configured for the
-  :class:`BalancingDispatcher`.
-
-- Having ``throughput`` set to a low number makes no sense since you will only
-  be handing off to another actor that processes the same :class:`MailBox`
-  as yourself, which can be costly. Either the message just got into the
-  mailbox and you can receive it as well as anybody else, or everybody else
-  is busy and you are the only one available to receive the message.
-
-- Resizing the number of routees only introduce inertia, since resizing
-  is performed at specified intervals, but work stealing is instantaneous.
+   :class:`akka.dispatch.BalancingDispatcherConfigurator` since the messages meant
+   for the special router actor cannot be processed by any other actor.
+ 

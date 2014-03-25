@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote
 
@@ -33,7 +33,7 @@ object RemoteQuarantinePiercingSpec extends MultiNodeConfig {
   class Subject extends Actor {
     def receive = {
       case "shutdown" ⇒ context.system.shutdown()
-      case "identify" ⇒ sender ! (AddressUidExtension(context.system).addressUid, self)
+      case "identify" ⇒ sender() ! (AddressUidExtension(context.system).addressUid, self)
     }
   }
 
@@ -67,7 +67,7 @@ abstract class RemoteQuarantinePiercingSpec extends MultiNodeSpec(RemoteQuaranti
         enterBarrier("actor-identified")
 
         // Manually Quarantine the other system
-        RARP(system).provider.transport.quarantine(node(second).address, uidFirst)
+        RARP(system).provider.transport.quarantine(node(second).address, Some(uidFirst))
 
         // Quarantine is up -- Cannot communicate with remote system any more
         system.actorSelection(RootActorPath(secondAddress) / "user" / "subject") ! "identify"

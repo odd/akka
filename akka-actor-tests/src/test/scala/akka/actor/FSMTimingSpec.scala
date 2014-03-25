@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -20,7 +20,7 @@ class FSMTimingSpec extends AkkaSpec with ImplicitSender {
   expectMsg(1 second, CurrentState(fsm, Initial))
 
   ignoreMsg {
-    case Transition(_, Initial, _) ⇒ true
+    case Transition(_, bs: FSMTimingSpec.State, _) if bs eq Initial ⇒ true // SI-5900 workaround
   }
 
   "A Finite State Machine" must {
@@ -170,7 +170,7 @@ object FSMTimingSpec {
   case object Cancel
   case object SetHandler
 
-  case class Unhandled(msg: AnyRef)
+  final case class Unhandled(msg: AnyRef)
 
   class StateMachine(tester: ActorRef) extends Actor with FSM[State, Int] {
     import FSM._
@@ -200,12 +200,12 @@ object FSMTimingSpec {
         goto(Initial)
     }
     onTransition {
-      case Initial -> TestSingleTimerResubmit ⇒ setTimer("blah", Tick, 500.millis.dilated, false)
+      case Initial -> TestSingleTimerResubmit ⇒ setTimer("blah", Tick, 500.millis.dilated)
     }
     when(TestSingleTimerResubmit) {
       case Event(Tick, _) ⇒
         tester ! Tick
-        setTimer("blah", Tock, 500.millis.dilated, false)
+        setTimer("blah", Tock, 500.millis.dilated)
         stay()
       case Event(Tock, _) ⇒
         tester ! Tock
@@ -213,11 +213,11 @@ object FSMTimingSpec {
     }
     when(TestCancelTimer) {
       case Event(Tick, _) ⇒
-        setTimer("hallo", Tock, 1.milli.dilated, false)
+        setTimer("hallo", Tock, 1.milli.dilated)
         TestKit.awaitCond(context.asInstanceOf[ActorCell].mailbox.hasMessages, 1.second.dilated)
         cancelTimer("hallo")
-        sender ! Tick
-        setTimer("hallo", Tock, 500.millis.dilated, false)
+        sender() ! Tick
+        setTimer("hallo", Tock, 500.millis.dilated)
         stay
       case Event(Tock, _) ⇒
         tester ! Tock
@@ -240,7 +240,7 @@ object FSMTimingSpec {
       // FSM is suspended after processing this message and resumed 500ms later
       case Event(Tick, _) ⇒
         suspend(self)
-        setTimer("named", Tock, 1.millis.dilated, false)
+        setTimer("named", Tock, 1.millis.dilated)
         TestKit.awaitCond(context.asInstanceOf[ActorCell].mailbox.hasMessages, 1.second.dilated)
         stay forMax (1.millis.dilated) replying Tick
       case Event(Tock, _) ⇒

@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.contrib.pattern
@@ -63,20 +63,20 @@ object DistributedPubSubMediator {
    */
   def defaultProps(role: String): Props = props(Internal.roleOption(role))
 
-  @SerialVersionUID(1L) case class Put(ref: ActorRef)
-  @SerialVersionUID(1L) case class Remove(path: String)
-  @SerialVersionUID(1L) case class Subscribe(topic: String, ref: ActorRef)
-  @SerialVersionUID(1L) case class Unsubscribe(topic: String, ref: ActorRef)
-  @SerialVersionUID(1L) case class SubscribeAck(subscribe: Subscribe)
-  @SerialVersionUID(1L) case class UnsubscribeAck(unsubscribe: Unsubscribe)
-  @SerialVersionUID(1L) case class Publish(topic: String, msg: Any) extends DistributedPubSubMessage
-  @SerialVersionUID(1L) case class Send(path: String, msg: Any, localAffinity: Boolean) extends DistributedPubSubMessage {
+  @SerialVersionUID(1L) final case class Put(ref: ActorRef)
+  @SerialVersionUID(1L) final case class Remove(path: String)
+  @SerialVersionUID(1L) final case class Subscribe(topic: String, ref: ActorRef)
+  @SerialVersionUID(1L) final case class Unsubscribe(topic: String, ref: ActorRef)
+  @SerialVersionUID(1L) final case class SubscribeAck(subscribe: Subscribe)
+  @SerialVersionUID(1L) final case class UnsubscribeAck(unsubscribe: Unsubscribe)
+  @SerialVersionUID(1L) final case class Publish(topic: String, msg: Any) extends DistributedPubSubMessage
+  @SerialVersionUID(1L) final case class Send(path: String, msg: Any, localAffinity: Boolean) extends DistributedPubSubMessage {
     /**
      * Convenience constructor with `localAffinity` false
      */
     def this(path: String, msg: Any) = this(path, msg, localAffinity = false)
   }
-  @SerialVersionUID(1L) case class SendToAll(path: String, msg: Any, allButSelf: Boolean = false) extends DistributedPubSubMessage {
+  @SerialVersionUID(1L) final case class SendToAll(path: String, msg: Any, allButSelf: Boolean = false) extends DistributedPubSubMessage {
     def this(path: String, msg: Any) = this(path, msg, allButSelf = false)
   }
 
@@ -90,20 +90,20 @@ object DistributedPubSubMediator {
     case object Prune
 
     @SerialVersionUID(1L)
-    case class Bucket(
+    final case class Bucket(
       owner: Address,
       version: Long,
       content: Map[String, ValueHolder])
 
     @SerialVersionUID(1L)
-    case class ValueHolder(version: Long, ref: Option[ActorRef]) {
+    final case class ValueHolder(version: Long, ref: Option[ActorRef]) {
       @transient lazy val routee: Option[Routee] = ref map ActorRefRoutee
     }
 
     @SerialVersionUID(1L)
-    case class Status(versions: Map[Address, Long]) extends DistributedPubSubMessage
+    final case class Status(versions: Map[Address, Long]) extends DistributedPubSubMessage
     @SerialVersionUID(1L)
-    case class Delta(buckets: immutable.Iterable[Bucket]) extends DistributedPubSubMessage
+    final case class Delta(buckets: immutable.Iterable[Bucket]) extends DistributedPubSubMessage
 
     case object GossipTick
 
@@ -130,11 +130,11 @@ object DistributedPubSubMediator {
           context watch ref
           subscribers += ref
           pruneDeadline = None
-          sender.tell(SubscribeAck(msg), context.parent)
+          sender().tell(SubscribeAck(msg), context.parent)
         case msg @ Unsubscribe(_, ref) ⇒
           context unwatch ref
           remove(ref)
-          sender.tell(UnsubscribeAck(msg), context.parent)
+          sender().tell(UnsubscribeAck(msg), context.parent)
         case Terminated(ref) ⇒
           remove(ref)
         case Prune ⇒
@@ -283,7 +283,7 @@ class DistributedPubSubMediator(
           } yield routee).toVector
 
           if (routees.nonEmpty)
-            Router(routingLogic, routees).route(msg, sender)
+            Router(routingLogic, routees).route(msg, sender())
       }
 
     case SendToAll(path, msg, skipSenderNode) ⇒
@@ -330,18 +330,22 @@ class DistributedPubSubMediator(
       // gossip chat starts with a Status message, containing the bucket versions of the other node
       val delta = collectDelta(otherVersions)
       if (delta.nonEmpty)
-        sender ! Delta(delta)
+        sender() ! Delta(delta)
       if (otherHasNewerVersions(otherVersions))
-        sender ! Status(versions = myVersions) // it will reply with Delta
+        sender() ! Status(versions = myVersions) // it will reply with Delta
 
     case Delta(buckets) ⇒
       // reply from Status message in the gossip chat
       // the Delta contains potential updates (newer versions) from the other node
-      if (nodes.contains(sender.path.address)) {
+      // only accept deltas/buckets from known nodes, otherwise there is a risk of
+      // adding back entries when nodes are removed
+      if (nodes(sender().path.address)) {
         buckets foreach { b ⇒
-          val myBucket = registry(b.owner)
-          if (b.version > myBucket.version) {
-            registry += (b.owner -> myBucket.copy(version = b.version, content = myBucket.content ++ b.content))
+          if (nodes(b.owner)) {
+            val myBucket = registry(b.owner)
+            if (b.version > myBucket.version) {
+              registry += (b.owner -> myBucket.copy(version = b.version, content = myBucket.content ++ b.content))
+            }
           }
         }
       }
@@ -384,13 +388,13 @@ class DistributedPubSubMediator(
           case (_, valueHolder) ⇒ valueHolder.ref.isDefined
         }
       }.sum
-      sender ! count
+      sender() ! count
   }
 
   def publish(path: String, msg: Any, allButSelf: Boolean = false): Unit = {
     for {
       (address, bucket) ← registry
-      if !(allButSelf && address == selfAddress) // if we should skip sender node and current address == self address => skip
+      if !(allButSelf && address == selfAddress) // if we should skip sender() node and current address == self address => skip
       valueHolder ← bucket.content.get(path)
       ref ← valueHolder.ref
     } ref forward msg
@@ -405,7 +409,7 @@ class DistributedPubSubMediator(
 
   def mkKey(ref: ActorRef): String = mkKey(ref.path)
 
-  def mkKey(path: ActorPath): String = path.elements.mkString("/", "/", "")
+  def mkKey(path: ActorPath): String = path.toStringWithoutAddress
 
   def myVersions: Map[Address, Long] = registry.map { case (owner, bucket) ⇒ (owner -> bucket.version) }
 
@@ -501,8 +505,8 @@ class DistributedPubSubExtension(system: ExtendedActorSystem) extends Extension 
         case "broadcast"          ⇒ BroadcastRoutingLogic()
         case other                ⇒ throw new IllegalArgumentException(s"Unknown 'routing-logic': [$other]")
       }
-      val gossipInterval = Duration(config.getMilliseconds("gossip-interval"), MILLISECONDS)
-      val removedTimeToLive = Duration(config.getMilliseconds("removed-time-to-live"), MILLISECONDS)
+      val gossipInterval = config.getDuration("gossip-interval", MILLISECONDS).millis
+      val removedTimeToLive = config.getDuration("removed-time-to-live", MILLISECONDS).millis
       val maxDeltaElements = config.getInt("max-delta-elements")
       val name = config.getString("name")
       system.actorOf(DistributedPubSubMediator.props(role, routingLogic, gossipInterval, removedTimeToLive, maxDeltaElements),

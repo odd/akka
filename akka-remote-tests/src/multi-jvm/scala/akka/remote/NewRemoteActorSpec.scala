@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote
 
@@ -19,7 +19,7 @@ object NewRemoteActorMultiJvmSpec extends MultiNodeConfig {
 
   class SomeActor extends Actor {
     def receive = {
-      case "identify" ⇒ sender ! self
+      case "identify" ⇒ sender() ! self
     }
   }
 
@@ -59,7 +59,7 @@ class NewRemoteActorSpec extends MultiNodeSpec(NewRemoteActorMultiJvmSpec)
 
         val slaveAddress = testConductor.getAddressFor(slave).await
         actor ! "identify"
-        expectMsgType[ActorRef].path.address should equal(slaveAddress)
+        expectMsgType[ActorRef].path.address should be(slaveAddress)
       }
 
       enterBarrier("done")
@@ -74,7 +74,7 @@ class NewRemoteActorSpec extends MultiNodeSpec(NewRemoteActorMultiJvmSpec)
 
         val slaveAddress = testConductor.getAddressFor(slave).await
         actor ! "identify"
-        expectMsgType[ActorRef].path.address should equal(slaveAddress)
+        expectMsgType[ActorRef].path.address should be(slaveAddress)
       }
 
       enterBarrier("done")
@@ -96,7 +96,7 @@ class NewRemoteActorSpec extends MultiNodeSpec(NewRemoteActorMultiJvmSpec)
 
         // master system is supposed to be shutdown after slave
         // this should be triggered by slave system shutdown
-        expectMsgPF(remaining) { case Terminated(`actor`) ⇒ true }
+        expectMsgPF() { case Terminated(`actor`) ⇒ true }
       }
 
       runOn(slave) {

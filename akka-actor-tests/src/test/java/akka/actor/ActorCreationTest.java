@@ -1,5 +1,5 @@
 /**
- *   Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor;
@@ -22,7 +22,7 @@ public class ActorCreationTest {
       });
       assert false;
     } catch(IllegalArgumentException e) {
-      assertEquals("cannot use non-static local Creator to create actors; make it static or top-level", e.getMessage());
+      assertEquals("cannot use non-static local Creator to create actors; make it static (e.g. local to a static method) or top-level", e.getMessage());
     }
   }
   
@@ -54,19 +54,38 @@ public class ActorCreationTest {
       return null;
     }
   }
-  
+
+
+  static class G implements Creator {
+    public Object create() {
+      return null;
+    }
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  public void testErasedCreator() {
+    try {
+      Props.create(new G());
+      assert false;
+    } catch(IllegalArgumentException e) {
+      assertEquals("erased Creator types are unsupported, use Props.create(actorClass, creator) instead", e.getMessage());
+    }
+    Props.create(UntypedActor.class, new G());
+  }
+
   @Test
   public void testRightCreator() {
     final Props p = Props.create(new C());
     assertEquals(UntypedActor.class, p.actorClass());
   }
 
-    @Test
-    public void testTopLevelNonStaticCreator() {
-        final Props p = Props.create(new NonStaticCreator());
-        assertEquals(UntypedActor.class, p.actorClass());
-    }
-  
+  @Test
+  public void testTopLevelNonStaticCreator() {
+    final Props p = Props.create(new NonStaticCreator());
+    assertEquals(UntypedActor.class, p.actorClass());
+  }
+
   @Test
   public void testParametricCreator() {
     final Props p = Props.create(new D<UntypedActor>());

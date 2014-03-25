@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.remote
@@ -23,7 +23,7 @@ import akka.dispatch.{ RequiresMessageQueue, UnboundedMessageQueueSemantics }
  * INTERNAL API
  */
 private[akka] object RemoteActorRefProvider {
-  private case class Internals(transport: RemoteTransport, serialization: Serialization, remoteDaemon: InternalActorRef)
+  private final case class Internals(transport: RemoteTransport, serialization: Serialization, remoteDaemon: InternalActorRef)
     extends NoSerializationVerificationNeeded
 
   sealed trait TerminatorState
@@ -230,11 +230,11 @@ private[akka] class RemoteActorRefProvider(
        *
        * Example:
        *
-       * akka://sys@home:1234/remote/akka/sys@remote:6667/remote/akka/sys@other:3333/user/a/b/c
+       * akka.tcp://sys@home:1234/remote/akka/sys@remote:6667/remote/akka/sys@other:3333/user/a/b/c
        *
-       * means that the logical parent originates from “akka://sys@other:3333” with
-       * one child (may be “a” or “b”) being deployed on “akka://sys@remote:6667” and
-       * finally either “b” or “c” being created on “akka://sys@home:1234”, where
+       * means that the logical parent originates from “akka.tcp://sys@other:3333” with
+       * one child (may be “a” or “b”) being deployed on “akka.tcp://sys@remote:6667” and
+       * finally either “b” or “c” being created on “akka.tcp://sys@home:1234”, where
        * this whole thing actually resides. Thus, the logical path is
        * “/user/a/b/c” and the physical path contains all remote placement
        * information.
@@ -417,9 +417,10 @@ private[akka] class RemoteActorRefProvider(
   /**
    * Marks a remote system as out of sync and prevents reconnects until the quarantine timeout elapses.
    * @param address Address of the remote system to be quarantined
-   * @param uid UID of the remote system
+   * @param uid UID of the remote system, if the uid is not defined it will not be a strong quarantine but
+   *   the current endpoint writer will be stopped (dropping system messages) and the address will be gated
    */
-  def quarantine(address: Address, uid: Int): Unit = transport.quarantine(address: Address, uid: Int)
+  def quarantine(address: Address, uid: Option[Int]): Unit = transport.quarantine(address, uid)
 
   /**
    * INTERNAL API

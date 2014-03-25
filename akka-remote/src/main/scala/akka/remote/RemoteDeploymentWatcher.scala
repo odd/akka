@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.remote
@@ -15,7 +15,7 @@ import akka.dispatch.{ UnboundedMessageQueueSemantics, RequiresMessageQueue }
  * INTERNAL API
  */
 private[akka] object RemoteDeploymentWatcher {
-  case class WatchRemote(actor: ActorRef, supervisor: ActorRef)
+  final case class WatchRemote(actor: ActorRef, supervisor: ActorRef)
 }
 
 /**

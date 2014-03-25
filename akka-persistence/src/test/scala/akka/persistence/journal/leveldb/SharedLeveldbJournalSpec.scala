@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.persistence.journal.leveldb
@@ -35,6 +35,7 @@ object SharedLeveldbJournalSpec {
         loglevel = ERROR
         log-dead-letters = 0
         log-dead-letters-during-shutdown = off
+        test.single-expect-default = 10s
       }
     """
 
@@ -86,7 +87,7 @@ class SharedLeveldbJournalSpec extends AkkaSpec(SharedLeveldbJournalSpec.config)
       appA ! Persistent("a1")
       appB ! Persistent("b1")
 
-      processorAProbe.expectMsg(5.seconds, "a1")
+      processorAProbe.expectMsg("a1")
       processorBProbe.expectMsg("b1")
 
       val recoveredAppA = processorASystem.actorOf(Props(classOf[ExampleApp], processorAProbe.ref, storePath))

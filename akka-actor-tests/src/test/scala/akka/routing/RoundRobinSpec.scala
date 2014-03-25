@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.routing
 
@@ -18,7 +18,7 @@ import akka.actor.ActorRef
 class RoundRobinSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
 
   def routeeSize(router: ActorRef): Int =
-    Await.result(router ? GetRoutees, remaining).asInstanceOf[Routees].routees.size
+    Await.result(router ? GetRoutees, timeout.duration).asInstanceOf[Routees].routees.size
 
   "round robin pool" must {
 
@@ -58,7 +58,7 @@ class RoundRobinSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
       val actor = system.actorOf(RoundRobinPool(connectionCount).props(routeeProps = Props(new Actor {
         lazy val id = counter.getAndIncrement()
         def receive = {
-          case "hit" ⇒ sender ! id
+          case "hit" ⇒ sender() ! id
           case "end" ⇒ doneLatch.countDown()
         }
       })), "round-robin")
@@ -128,11 +128,11 @@ class RoundRobinSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
       val paths = (1 to connectionCount) map { n ⇒
         val ref = system.actorOf(Props(new Actor {
           def receive = {
-            case "hit" ⇒ sender ! self.path.name
+            case "hit" ⇒ sender() ! self.path.name
             case "end" ⇒ doneLatch.countDown()
           }
         }), name = "target-" + n)
-        ref.path.elements.mkString("/", "/", "")
+        ref.path.toStringWithoutAddress
       }
 
       val actor = system.actorOf(RoundRobinGroup(paths).props(), "round-robin-group1")
@@ -170,13 +170,13 @@ class RoundRobinSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
             router = router.removeRoutee(c)
             if (router.routees.isEmpty)
               context.stop(self)
-          case other ⇒ router.route(other, sender)
+          case other ⇒ router.route(other, sender())
         }
       }))
 
       val childProps = Props(new Actor {
         def receive = {
-          case "hit" ⇒ sender ! self.path.name
+          case "hit" ⇒ sender() ! self.path.name
           case "end" ⇒ context.stop(self)
         }
       })

@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote
 
@@ -28,26 +28,28 @@ object RemoteNodeDeathWatchMultiJvmSpec extends MultiNodeConfig {
     ConfigFactory.parseString("""
       akka.loglevel = INFO
       akka.remote.log-remote-lifecycle-events = off
-      """)))
+      ## Use a tighter setting than the default, otherwise it takes 20s for DeathWatch to trigger
+      akka.remote.watch-failure-detector.acceptable-heartbeat-pause = 3 s
+                              """)))
 
-  case class WatchIt(watchee: ActorRef)
-  case class UnwatchIt(watchee: ActorRef)
+  final case class WatchIt(watchee: ActorRef)
+  final case class UnwatchIt(watchee: ActorRef)
   case object Ack
 
   /**
    * Forwarding `Terminated` to non-watching testActor is not possible,
    * and therefore the `Terminated` message is wrapped.
    */
-  case class WrappedTerminated(t: Terminated)
+  final case class WrappedTerminated(t: Terminated)
 
   class ProbeActor(testActor: ActorRef) extends Actor {
     def receive = {
       case WatchIt(watchee) ⇒
         context watch watchee
-        sender ! Ack
+        sender() ! Ack
       case UnwatchIt(watchee) ⇒
         context unwatch watchee
-        sender ! Ack
+        sender() ! Ack
       case t: Terminated ⇒
         testActor forward WrappedTerminated(t)
       case msg ⇒ testActor forward msg

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.actor
 
@@ -39,6 +39,14 @@ class ActorPathSpec extends WordSpec with Matchers {
 
     "have correct path elements" in {
       (RootActorPath(Address("akka.tcp", "mysys")) / "user" / "foo" / "bar").elements.toSeq should be(Seq("user", "foo", "bar"))
+    }
+
+    "create correct toStringWithoutAddress" in {
+      val a = Address("akka.tcp", "mysys")
+      RootActorPath(a).toStringWithoutAddress should be("/")
+      (RootActorPath(a) / "user").toStringWithoutAddress should be("/user")
+      (RootActorPath(a) / "user" / "foo").toStringWithoutAddress should be("/user/foo")
+      (RootActorPath(a) / "user" / "foo" / "bar").toStringWithoutAddress should be("/user/foo/bar")
     }
 
     "create correct toStringWithAddress" in {

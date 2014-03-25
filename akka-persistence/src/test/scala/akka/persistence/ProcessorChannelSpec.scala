@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.persistence
@@ -12,8 +12,6 @@ import com.typesafe.config._
 import akka.actor._
 import akka.testkit._
 
-import akka.persistence.JournalProtocol.Confirm
-
 object ProcessorChannelSpec {
   class TestProcessor(name: String) extends NamedProcessor(name) {
     val destination = context.actorOf(Props[TestDestination])
@@ -23,10 +21,10 @@ object ProcessorChannelSpec {
       case m @ Persistent(s: String, _) if s.startsWith("a") ⇒
         // forward to destination via channel,
         // destination replies to initial sender
-        channel forward Deliver(m.withPayload(s"fw: ${s}"), destination)
+        channel forward Deliver(m.withPayload(s"fw: ${s}"), destination.path)
       case m @ Persistent(s: String, _) if s.startsWith("b") ⇒
         // reply to sender via channel
-        channel ! Deliver(m.withPayload(s"re: ${s}"), sender)
+        channel ! Deliver(m.withPayload(s"re: ${s}"), sender.path)
     }
   }
 
@@ -40,7 +38,7 @@ object ProcessorChannelSpec {
     val channel = context.actorOf(Channel.props("channel", ChannelSettings(redeliverMax = 1, redeliverInterval = 100 milliseconds)))
 
     def receive = {
-      case p: Persistent ⇒ channel ! Deliver(p, destination)
+      case p: Persistent ⇒ channel ! Deliver(p, destination.path)
       case "replay"      ⇒ throw new TestException("replay requested")
     }
   }
@@ -52,10 +50,10 @@ object ProcessorChannelSpec {
 
     def handleEvent(event: String) = {
       events = event :: events
-      channel ! Deliver(Persistent(event), destination)
+      channel ! Deliver(Persistent(event), destination.path)
     }
 
-    def receiveReplay: Receive = {
+    def receiveRecover: Receive = {
       case event: String ⇒ handleEvent(event)
     }
 
@@ -83,10 +81,10 @@ abstract class ProcessorChannelSpec(config: Config) extends AkkaSpec(config) wit
   }
 
   def subscribeToConfirmation(probe: TestProbe): Unit =
-    system.eventStream.subscribe(probe.ref, classOf[Confirm])
+    system.eventStream.subscribe(probe.ref, classOf[Delivered])
 
   def awaitConfirmation(probe: TestProbe): Unit =
-    probe.expectMsgType[Confirm]
+    probe.expectMsgType[Delivered]
 
   def createTestProcessor(): ActorRef =
     system.actorOf(Props(classOf[TestProcessor], name))

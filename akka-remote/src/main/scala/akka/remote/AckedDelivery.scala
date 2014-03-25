@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote
 
@@ -20,7 +20,7 @@ object SeqNo {
 /**
  * Implements a 64 bit sequence number with proper wrap-around ordering.
  */
-case class SeqNo(rawValue: Long) extends Ordered[SeqNo] {
+final case class SeqNo(rawValue: Long) extends Ordered[SeqNo] {
 
   /**
    * Checks if this sequence number is an immediate successor of the provided one.
@@ -65,7 +65,7 @@ trait HasSequenceNumber {
  * @param cumulativeAck Represents the highest sequence number received.
  * @param nacks Set of sequence numbers between the last delivered one and cumulativeAck that has been not yet received.
  */
-case class Ack(cumulativeAck: SeqNo, nacks: Set[SeqNo] = Set.empty) {
+final case class Ack(cumulativeAck: SeqNo, nacks: Set[SeqNo] = Set.empty) {
   override def toString = s"ACK[$cumulativeAck, ${nacks.mkString("{", ", ", "}")}]"
 }
 
@@ -87,7 +87,7 @@ class ResendUnfulfillableException
  * @param maxSeq The maximum sequence number that has been stored in this buffer. Messages having lower sequence number
  *               will be not stored but rejected with [[java.lang.IllegalArgumentException]]
  */
-case class AckedSendBuffer[T <: HasSequenceNumber](
+final case class AckedSendBuffer[T <: HasSequenceNumber](
   capacity: Int,
   nonAcked: IndexedSeq[T] = Vector.empty[T],
   nacked: IndexedSeq[T] = Vector.empty[T],
@@ -126,13 +126,13 @@ case class AckedSendBuffer[T <: HasSequenceNumber](
 
 /**
  * Implements an immutable receive buffer that buffers incoming messages until they can be safely delivered. This
- * buffer works together with a [[akka.remote.AckedSendBuffer]] on the sender side.
+ * buffer works together with a [[akka.remote.AckedSendBuffer]] on the sender() side.
  *
  * @param lastDelivered Sequence number of the last message that has been delivered.
  * @param cumulativeAck The highest sequence number received so far.
  * @param buf Buffer of messages that are waiting for delivery
  */
-case class AckedReceiveBuffer[T <: HasSequenceNumber](
+final case class AckedReceiveBuffer[T <: HasSequenceNumber](
   lastDelivered: SeqNo = SeqNo(-1),
   cumulativeAck: SeqNo = SeqNo(-1),
   buf: SortedSet[T] = TreeSet.empty[T])(implicit val seqOrdering: Ordering[T]) {
@@ -151,7 +151,7 @@ case class AckedReceiveBuffer[T <: HasSequenceNumber](
   }
 
   /**
-   * Extract all messages that could be safely delivered, an updated ack to be sent to the sender, and an updated
+   * Extract all messages that could be safely delivered, an updated ack to be sent to the sender(), and an updated
    * buffer that has the messages removed that can be delivered.
    * @return Triplet of the updated buffer, messages that can be delivered and the updated acknowledgement.
    */

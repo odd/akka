@@ -38,12 +38,12 @@ An actor that uses the cluster extension may look like this:
 .. literalinclude:: ../../../akka-samples/akka-sample-cluster-scala/src/main/scala/sample/cluster/simple/SimpleClusterListener.scala
    :language: scala
 
-The actor registers itself as subscriber of certain cluster events. It gets notified with a snapshot event, ``CurrentClusterState`` 
-that holds full state information of the cluster. After that it receives events for changes that happen in the cluster.
+The actor registers itself as subscriber of certain cluster events. It receives events corresponding to the current state
+of the cluster when the subscription starts and then it receives events for changes that happen in the cluster.
 
-The easiest way to run this example yourself is to download `Typesafe Activator <http://typesafe.com/platform/getstarted>`_
-and open the tutorial named `Akka Cluster Samples with Scala <http://typesafe.com/activator/template/akka-sample-cluster-scala>`_.
-It contains instructions of how to run the <code>SimpleClusterApp</code>.
+The easiest way to run this example yourself is to download `Typesafe Activator <http://www.typesafe.com/platform/getstarted>`_
+and open the tutorial named `Akka Cluster Samples with Scala <http://www.typesafe.com/activator/template/akka-sample-cluster-scala>`_.
+It contains instructions of how to run the ``SimpleClusterApp``.
 
 Joining to Seed Nodes
 ^^^^^^^^^^^^^^^^^^^^^
@@ -160,14 +160,26 @@ Subscribe to Cluster Events
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 You can subscribe to change notifications of the cluster membership by using
-``Cluster(system).subscribe(subscriber, to)``. A snapshot of the full state,
-``akka.cluster.ClusterEvent.CurrentClusterState``, is sent to the subscriber
-as the first event, followed by events for incremental updates.
+``Cluster(system).subscribe``.
+
+.. includecode:: ../../../akka-samples/akka-sample-cluster-scala/src/main/scala/sample/cluster/simple/SimpleClusterListener2.scala#subscribe
+
+A snapshot of the full state, ``akka.cluster.ClusterEvent.CurrentClusterState``, is sent to the subscriber
+as the first message, followed by events for incremental updates.
 
 Note that you may receive an empty ``CurrentClusterState``, containing no members,
 if you start the subscription before the initial join procedure has completed. 
 This is expected behavior. When the node has been accepted in the cluster you will 
 receive ``MemberUp`` for that node, and other nodes.
+
+If you find it inconvenient to handle the ``CurrentClusterState`` you can use
+``ClusterEvent.InitialStateAsEvents`` as parameter to ``subscribe``.
+That means that instead of receiving ``CurrentClusterState`` as the first message you will receive
+the events corresponding to the current state to mimic what you would have seen if you were
+listening to the events when they occurred in the past. Note that those initial events only correspond
+to the current state and it is not the full history of all changes that actually has occurred in the cluster.  
+
+.. includecode:: ../../../akka-samples/akka-sample-cluster-scala/src/main/scala/sample/cluster/simple/SimpleClusterListener.scala#subscribe
 
 The events to track the life-cycle of members are:
 
@@ -183,6 +195,10 @@ The events to track the life-cycle of members are:
 There are more types of change events, consult the API documentation
 of classes that extends ``akka.cluster.ClusterEvent.ClusterDomainEvent``
 for details about the events.
+
+Instead of subscribing to cluster events it can sometimes be convenient to only get the full membership state with
+``Cluster(system).state``. Note that this state is not necessarily in sync with the events published to a
+cluster subscription. 
 
 Worker Dial-in Example
 ----------------------
@@ -216,10 +232,11 @@ Note that the ``TransformationFrontend`` actor watch the registered backend
 to be able to remove it from its list of available backend workers.
 Death watch uses the cluster failure detector for nodes in the cluster, i.e. it detects
 network failures and JVM crashes, in addition to graceful termination of watched
-actor.
+actor. Death watch generates the ``Terminated`` message to the watching actor when the 
+unreachable cluster node has been downed and removed.
 
-The `Typesafe Activator <http://typesafe.com/platform/getstarted>`_ tutorial named 
-`Akka Cluster Samples with Scala <http://typesafe.com/activator/template/akka-sample-cluster-scala>`_.
+The `Typesafe Activator <http://www.typesafe.com/platform/getstarted>`_ tutorial named 
+`Akka Cluster Samples with Scala <http://www.typesafe.com/activator/template/akka-sample-cluster-scala>`_.
 contains the full source code and instructions of how to run the **Worker Dial-in Example**.
 
 Node Roles
@@ -258,33 +275,40 @@ has at least the defined number of members.
 
 This callback can be used for other things than starting actors.
 
-Cluster Singleton Pattern
-^^^^^^^^^^^^^^^^^^^^^^^^^
+Cluster Singleton
+^^^^^^^^^^^^^^^^^
 
 For some use cases it is convenient and sometimes also mandatory to ensure that
 you have exactly one actor of a certain type running somewhere in the cluster.
 
 This can be implemented by subscribing to member events, but there are several corner 
 cases to consider. Therefore, this specific use case is made easily accessible by the 
-:ref:`cluster-singleton` in the contrib module. You can use it as is, or adjust to fit
-your specific needs.
+:ref:`cluster-singleton` in the contrib module.
 
 Cluster Sharding
 ^^^^^^^^^^^^^^^^
 
-When you have many stateful actors that together consume more resources (e.g. memory) than fit on one machine
-you need to distribute them across several nodes in the cluster. You want to be able to interact with them using their
-logical identifier, but without having to care about their physical location in the cluster.
+Distributes actors across several nodes in the cluster and supports interaction
+with the actors using their logical identifier, but without having to care about
+their physical location in the cluster.
 
 See :ref:`cluster-sharding` in the contrib module. 
 
-Distributed Publish Subscribe Pattern
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Distributed Publish Subscribe
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Publish-subscribe messaging between actors in the cluster, and point-to-point messaging
+using the logical path of the actors, i.e. the sender does not have to know on which
+node the destination actor is running.
 
 See :ref:`distributed-pub-sub` in the contrib module.
 
 Cluster Client
 ^^^^^^^^^^^^^^
+
+Communication from an actor system that is not part of the cluster to actors running
+somewhere in the cluster. The client does not have to know on which node the destination
+actor is running.
 
 See :ref:`cluster-client` in the contrib module.
 
@@ -356,9 +380,10 @@ This is how the curve looks like for ``acceptable-heartbeat-pause`` configured t
 .. image:: ../images/phi3.png
 
 
-Death watch uses the cluster failure detector for nodes in the cluster, i.e. it 
-generates ``Terminated`` message from network failures and JVM crashes, in addition 
-to graceful termination of watched actor. 
+Death watch uses the cluster failure detector for nodes in the cluster, i.e. it detects
+network failures and JVM crashes, in addition to graceful termination of watched
+actor. Death watch generates the ``Terminated`` message to the watching actor when the 
+unreachable cluster node has been downed and removed. 
 
 If you encounter suspicious false positives when the system is under load you should 
 define a separate dispatcher for the cluster actors as described in :ref:`cluster_dispatcher_scala`.
@@ -453,8 +478,8 @@ The router is configured with ``routees.paths``:
 This means that user requests can be sent to ``StatsService`` on any node and it will use
 ``StatsWorker`` on all nodes.
 
-The `Typesafe Activator <http://typesafe.com/platform/getstarted>`_ tutorial named 
-`Akka Cluster Samples with Scala <http://typesafe.com/activator/template/akka-sample-cluster-scala>`_.
+The `Typesafe Activator <http://www.typesafe.com/platform/getstarted>`_ tutorial named 
+`Akka Cluster Samples with Scala <http://www.typesafe.com/activator/template/akka-sample-cluster-scala>`_.
 contains the full source code and instructions of how to run the **Router Example with Group of Routees**.
 
 Router with Pool of Remote Deployed Routees
@@ -489,19 +514,19 @@ in the contrib module. The ``ClusterSingletonManager`` is started on each node.
 .. includecode:: ../../../akka-samples/akka-sample-cluster-scala/src/main/scala/sample/cluster/stats/StatsSampleOneMaster.scala#create-singleton-manager
 
 We also need an actor on each node that keeps track of where current single master exists and
-delegates jobs to the ``StatsService``.
+delegates jobs to the ``StatsService``.  That is provided by the ``ClusterSingletonProxy``.
 
-.. includecode:: ../../../akka-samples/akka-sample-cluster-scala/src/main/scala/sample/cluster/stats/StatsFacade.scala#facade
+.. includecode:: ../../../akka-samples/akka-sample-cluster-scala/src/main/scala/sample/cluster/stats/StatsSampleOneMaster.scala#singleton-proxy
 
-The ``StatsFacade`` receives text from users and delegates to the current ``StatsService``, the single
+The ``ClusterSingletonProxy`` receives text from users and delegates to the current ``StatsService``, the single
 master. It listens to cluster events to lookup the ``StatsService`` on the oldest node.
 
-All nodes start ``StatsFacade`` and the ``ClusterSingletonManager``. The router is now configured like this:
+All nodes start ``ClusterSingletonProxy`` and the ``ClusterSingletonManager``. The router is now configured like this:
 
 .. includecode:: ../../../akka-samples/akka-sample-cluster-scala/src/main/resources/stats2.conf#config-router-deploy
 
-The `Typesafe Activator <http://typesafe.com/platform/getstarted>`_ tutorial named 
-`Akka Cluster Samples with Scala <http://typesafe.com/activator/template/akka-sample-cluster-scala>`_.
+The `Typesafe Activator <http://www.typesafe.com/platform/getstarted>`_ tutorial named 
+`Akka Cluster Samples with Scala <http://www.typesafe.com/activator/template/akka-sample-cluster-scala>`_.
 contains the full source code and instructions of how to run the **Router Example with Pool of Remote Deployed Routees**.
 
 Cluster Metrics
@@ -561,8 +586,8 @@ The same type of router could also have been defined in code:
 
 .. includecode:: ../../../akka-samples/akka-sample-cluster-scala/src/main/scala/sample/cluster/factorial/Extra.scala#router-deploy-in-code
 
-The `Typesafe Activator <http://typesafe.com/platform/getstarted>`_ tutorial named 
-`Akka Cluster Samples with Scala <http://typesafe.com/activator/template/akka-sample-cluster-scala>`_.
+The `Typesafe Activator <http://www.typesafe.com/platform/getstarted>`_ tutorial named 
+`Akka Cluster Samples with Scala <http://www.typesafe.com/activator/template/akka-sample-cluster-scala>`_.
 contains the full source code and instructions of how to run the **Adaptive Load Balancing** sample.
 
 Subscribe to Metrics Events
@@ -700,12 +725,8 @@ Example of system properties to enable remote monitoring and management::
 Configuration
 ^^^^^^^^^^^^^
 
-There are several configuration properties for the cluster. We refer to the following
-reference file for more information:
-
-
-.. literalinclude:: ../../../akka-cluster/src/main/resources/reference.conf
-   :language: none
+There are several configuration properties for the cluster. We refer to the 
+:ref:`reference configuration <config-akka-cluster>` for more information.
 
 Cluster Info Logging
 --------------------

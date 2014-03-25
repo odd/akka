@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.cluster
 
@@ -35,19 +35,19 @@ private[cluster] object ClusterUserAction {
    * Join will be sent to the other node.
    */
   @SerialVersionUID(1L)
-  case class JoinTo(address: Address)
+  final case class JoinTo(address: Address)
 
   /**
    * Command to leave the cluster.
    */
   @SerialVersionUID(1L)
-  case class Leave(address: Address) extends ClusterMessage
+  final case class Leave(address: Address) extends ClusterMessage
 
   /**
    * Command to mark node as temporary down.
    */
   @SerialVersionUID(1L)
-  case class Down(address: Address) extends ClusterMessage
+  final case class Down(address: Address) extends ClusterMessage
 
 }
 
@@ -61,20 +61,20 @@ private[cluster] object InternalClusterAction {
    * @param node the node that wants to join the cluster
    */
   @SerialVersionUID(1L)
-  case class Join(node: UniqueAddress, roles: Set[String]) extends ClusterMessage
+  final case class Join(node: UniqueAddress, roles: Set[String]) extends ClusterMessage
 
   /**
    * Reply to Join
    * @param from the sender node in the cluster, i.e. the node that received the Join command
    */
   @SerialVersionUID(1L)
-  case class Welcome(from: UniqueAddress, gossip: Gossip) extends ClusterMessage
+  final case class Welcome(from: UniqueAddress, gossip: Gossip) extends ClusterMessage
 
   /**
    * Command to initiate the process to join the specified
    * seed nodes.
    */
-  case class JoinSeedNodes(seedNodes: immutable.IndexedSeq[Address])
+  final case class JoinSeedNodes(seedNodes: immutable.IndexedSeq[Address])
 
   /**
    * Start message of the process to join one of the seed nodes.
@@ -96,13 +96,13 @@ private[cluster] object InternalClusterAction {
    * @see JoinSeedNode
    */
   @SerialVersionUID(1L)
-  case class InitJoinAck(address: Address) extends ClusterMessage
+  final case class InitJoinAck(address: Address) extends ClusterMessage
 
   /**
    * @see JoinSeedNode
    */
   @SerialVersionUID(1L)
-  case class InitJoinNack(address: Address) extends ClusterMessage
+  final case class InitJoinNack(address: Address) extends ClusterMessage
 
   /**
    * Marker interface for periodic tick messages
@@ -121,30 +121,29 @@ private[cluster] object InternalClusterAction {
 
   case object PublishStatsTick extends Tick
 
-  case class SendGossipTo(address: Address)
+  final case class SendGossipTo(address: Address)
 
   case object GetClusterCoreRef
 
-  case class PublisherCreated(publisher: ActorRef)
+  final case class PublisherCreated(publisher: ActorRef)
 
   /**
    * Comand to [[akka.cluster.ClusterDaemon]] to create a
    * [[akka.cluster.OnMemberUpListener]].
    */
-  case class AddOnMemberUpListener(callback: Runnable) extends NoSerializationVerificationNeeded
+  final case class AddOnMemberUpListener(callback: Runnable) extends NoSerializationVerificationNeeded
 
   sealed trait SubscriptionMessage
-  case class Subscribe(subscriber: ActorRef, to: Class[_]) extends SubscriptionMessage
-  case class Unsubscribe(subscriber: ActorRef, to: Option[Class[_]]) extends SubscriptionMessage
+  final case class Subscribe(subscriber: ActorRef, initialStateMode: SubscriptionInitialStateMode, to: Set[Class[_]]) extends SubscriptionMessage
+  final case class Unsubscribe(subscriber: ActorRef, to: Option[Class[_]]) extends SubscriptionMessage
   /**
-   * @param receiver if `receiver` is defined the event will only be sent to that
-   *   actor, otherwise it will be sent to all subscribers via the `eventStream`.
+   * @param receiver [[akka.cluster.ClusterEvent.CurrentClusterState]] will be sent to the `receiver`
    */
-  case class PublishCurrentClusterState(receiver: Option[ActorRef]) extends SubscriptionMessage
+  final case class SendCurrentClusterState(receiver: ActorRef) extends SubscriptionMessage
 
   sealed trait PublishMessage
-  case class PublishChanges(newGossip: Gossip) extends PublishMessage
-  case class PublishEvent(event: ClusterDomainEvent) extends PublishMessage
+  final case class PublishChanges(newGossip: Gossip) extends PublishMessage
+  final case class PublishEvent(event: ClusterDomainEvent) extends PublishMessage
 }
 
 /**
@@ -206,7 +205,7 @@ private[cluster] final class ClusterCoreSupervisor extends Actor with ActorLoggi
   override def postStop(): Unit = Cluster(context.system).shutdown()
 
   def receive = {
-    case InternalClusterAction.GetClusterCoreRef ⇒ sender ! coreDaemon
+    case InternalClusterAction.GetClusterCoreRef ⇒ sender() ! coreDaemon
   }
 }
 
@@ -219,7 +218,7 @@ private[cluster] class ClusterCoreDaemon(publisher: ActorRef) extends Actor with
 
   val cluster = Cluster(context.system)
   import cluster.{ selfAddress, scheduler, failureDetector }
-  import cluster.settings.{ AutoDown ⇒ _, _ }
+  import cluster.settings._
   import cluster.InfoLogger._
 
   protected def selfUniqueAddress = cluster.selfUniqueAddress
@@ -289,7 +288,7 @@ private[cluster] class ClusterCoreDaemon(publisher: ActorRef) extends Actor with
   }
 
   def uninitialized: Actor.Receive = {
-    case InitJoin                          ⇒ sender ! InitJoinNack(selfAddress)
+    case InitJoin                          ⇒ sender() ! InitJoinNack(selfAddress)
     case ClusterUserAction.JoinTo(address) ⇒ join(address)
     case JoinSeedNodes(seedNodes)          ⇒ joinSeedNodes(seedNodes)
     case msg: SubscriptionMessage          ⇒ publisher forward msg
@@ -297,7 +296,7 @@ private[cluster] class ClusterCoreDaemon(publisher: ActorRef) extends Actor with
 
   def tryingToJoin(joinWith: Address, deadline: Option[Deadline]): Actor.Receive = {
     case Welcome(from, gossip) ⇒ welcome(joinWith, from, gossip)
-    case InitJoin              ⇒ sender ! InitJoinNack(selfAddress)
+    case InitJoin              ⇒ sender() ! InitJoinNack(selfAddress)
     case ClusterUserAction.JoinTo(address) ⇒
       becomeUninitialized()
       join(address)
@@ -364,7 +363,7 @@ private[cluster] class ClusterCoreDaemon(publisher: ActorRef) extends Actor with
     case other             ⇒ super.unhandled(other)
   }
 
-  def initJoin(): Unit = sender ! InitJoinAck(selfAddress)
+  def initJoin(): Unit = sender() ! InitJoinAck(selfAddress)
 
   def joinSeedNodes(seedNodes: immutable.IndexedSeq[Address]): Unit = {
     if (seedNodes.nonEmpty) {
@@ -464,7 +463,7 @@ private[cluster] class ClusterCoreDaemon(publisher: ActorRef) extends Actor with
 
         logInfo("Node [{}] is JOINING, roles [{}]", node.address, roles.mkString(", "))
         if (node != selfUniqueAddress) {
-          sender ! Welcome(selfUniqueAddress, latestGossip)
+          sender() ! Welcome(selfUniqueAddress, latestGossip)
         }
 
         publish(latestGossip)
@@ -484,7 +483,7 @@ private[cluster] class ClusterCoreDaemon(publisher: ActorRef) extends Actor with
       latestGossip = gossip seen selfUniqueAddress
       publish(latestGossip)
       if (from != selfUniqueAddress)
-        gossipTo(from, sender)
+        gossipTo(from, sender())
       becomeInitialized()
     }
   }
@@ -574,8 +573,8 @@ private[cluster] class ClusterCoreDaemon(publisher: ActorRef) extends Actor with
     else {
       (status.version compareTo latestGossip.version) match {
         case VectorClock.Same  ⇒ // same version
-        case VectorClock.After ⇒ gossipStatusTo(from, sender) // remote is newer
-        case _                 ⇒ gossipTo(from, sender) // conflicting or local is newer
+        case VectorClock.After ⇒ gossipStatusTo(from, sender()) // remote is newer
+        case _                 ⇒ gossipTo(from, sender()) // conflicting or local is newer
       }
     }
   }
@@ -664,9 +663,9 @@ private[cluster] class ClusterCoreDaemon(publisher: ActorRef) extends Actor with
       if (selfStatus == Exiting || selfStatus == Down)
         shutdown()
       else if (talkback) {
-        // send back gossip to sender when sender had different view, i.e. merge, or sender had
-        // older or sender had newer
-        gossipTo(from, sender)
+        // send back gossip to sender() when sender() had different view, i.e. merge, or sender() had
+        // older or sender() had newer
+        gossipTo(from, sender())
       }
       gossipType
     }
@@ -690,7 +689,6 @@ private[cluster] class ClusterCoreDaemon(publisher: ActorRef) extends Actor with
    * Initiates a new round of gossip.
    */
   def gossip(): Unit = {
-    log.debug("Cluster Node [{}] - Initiating new round of gossip", selfAddress)
 
     if (!isSingletonCluster) {
       val localGossip = latestGossip
@@ -1135,7 +1133,7 @@ private[cluster] class OnMemberUpListener(callback: Runnable) extends Actor with
  * INTERNAL API
  */
 @SerialVersionUID(1L)
-private[cluster] case class GossipStats(
+private[cluster] final case class GossipStats(
   receivedGossipCount: Long = 0L,
   mergeCount: Long = 0L,
   sameCount: Long = 0L,
@@ -1178,7 +1176,7 @@ private[cluster] case class GossipStats(
  * INTERNAL API
  */
 @SerialVersionUID(1L)
-private[cluster] case class VectorClockStats(
+private[cluster] final case class VectorClockStats(
   versionSize: Int = 0,
   seenLatest: Int = 0)
 

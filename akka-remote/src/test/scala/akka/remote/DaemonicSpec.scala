@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote
 
@@ -36,6 +36,7 @@ class DaemonicSpec extends AkkaSpec {
         akka.actor.provider = "akka.remote.RemoteActorRefProvider"
         akka.remote.netty.tcp.transport-class = "akka.remote.transport.netty.NettyTransport"
         akka.remote.netty.tcp.port = 0
+        akka.log-dead-letters-during-shutdown = off
       """))
 
       val unusedAddress = addr(daemonicSystem, "tcp").copy(port = Some(unusedPort))

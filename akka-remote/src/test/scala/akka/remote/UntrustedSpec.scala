@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.remote
@@ -26,8 +26,8 @@ import akka.event.Logging
 import akka.testkit.EventFilter
 
 object UntrustedSpec {
-  case class IdentifyReq(path: String)
-  case class StopChild(name: String)
+  final case class IdentifyReq(path: String)
+  final case class StopChild(name: String)
 
   class Receptionist(testActor: ActorRef) extends Actor {
     context.actorOf(Props(classOf[Child], testActor), "child1")
@@ -35,7 +35,7 @@ object UntrustedSpec {
     context.actorOf(Props(classOf[FakeUser], testActor), "user")
 
     def receive = {
-      case IdentifyReq(path) ⇒ context.actorSelection(path).tell(Identify(None), sender)
+      case IdentifyReq(path) ⇒ context.actorSelection(path).tell(Identify(None), sender())
       case StopChild(name)   ⇒ context.child(name) foreach context.stop
       case msg               ⇒ testActor forward msg
     }
@@ -155,7 +155,7 @@ akka.loglevel = DEBUG
         Identify(None), p.ref)
       val clientReceptionistRef = p.expectMsgType[ActorIdentity].ref.get
 
-      val sel = ActorSelection(clientReceptionistRef, receptionist.path.elements.mkString("/", "/", ""))
+      val sel = ActorSelection(clientReceptionistRef, receptionist.path.toStringWithoutAddress)
       sel ! "hello"
       expectNoMsg(1.second)
     }

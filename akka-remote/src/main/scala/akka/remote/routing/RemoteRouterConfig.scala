@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote.routing
 
@@ -27,7 +27,7 @@ import akka.japi.Util.immutableSeq
  * [[akka.routing.RouterConfig]] implementation for remote deployment on defined
  * target nodes. Delegates other duties to the local [[akka.routing.Pool]],
  * which makes it possible to mix this with the built-in routers such as
- * [[akka.routing.RoundRobinRouter]] or custom routers.
+ * [[akka.routing.RoundRobinGroup]] or custom routers.
  */
 @SerialVersionUID(1L)
 final case class RemoteRouterConfig(local: Pool, nodes: Iterable[Address]) extends Pool {

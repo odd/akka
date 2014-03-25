@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.remote
@@ -65,7 +65,7 @@ private[akka] abstract class RemoteTransport(val system: ExtendedActorSystem, va
   def start(): Unit
 
   /**
-   * Sends the given message to the recipient supplying the sender if any
+   * Sends the given message to the recipient supplying the sender() if any
    */
   def send(message: Any, senderOption: Option[ActorRef], recipient: RemoteActorRef): Unit
 
@@ -85,18 +85,14 @@ private[akka] abstract class RemoteTransport(val system: ExtendedActorSystem, va
   /**
    * Marks a remote system as out of sync and prevents reconnects until the quarantine timeout elapses.
    * @param address Address of the remote system to be quarantined
-   * @param uid UID of the remote system
+   * @param uid UID of the remote system, if the uid is not defined it will not be a strong quarantine but
+   *   the current endpoint writer will be stopped (dropping system messages) and the address will be gated
    */
-  def quarantine(address: Address, uid: Int): Unit
+  def quarantine(address: Address, uid: Option[Int]): Unit
 
   /**
    * When this method returns true, some functionality will be turned off for security purposes.
    */
   protected def useUntrustedMode: Boolean
-
-  /**
-   * When this method returns true, RemoteLifeCycleEvents will be logged as well as be put onto the eventStream.
-   */
-  protected def logRemoteLifeCycleEvents: Boolean
 
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.serialization
@@ -13,12 +13,10 @@ import java.io._
 import scala.concurrent.Await
 import akka.util.Timeout
 import scala.concurrent.duration._
-import scala.reflect.BeanInfo
-import com.google.protobuf.Message
+import scala.beans.BeanInfo
 import com.typesafe.config._
 import akka.pattern.ask
-import org.apache.commons.codec.binary.Hex.{ encodeHex, decodeHex }
-import akka.OnlyCauseStackTrace
+import org.apache.commons.codec.binary.Hex.encodeHex
 
 object SerializationTests {
 
@@ -44,11 +42,11 @@ object SerializationTests {
   """
 
   @BeanInfo
-  case class Address(no: String, street: String, city: String, zip: String) { def this() = this("", "", "", "") }
+  final case class Address(no: String, street: String, city: String, zip: String) { def this() = this("", "", "", "") }
   @BeanInfo
-  case class Person(name: String, age: Int, address: Address) { def this() = this("", 0, null) }
+  final case class Person(name: String, age: Int, address: Address) { def this() = this("", 0, null) }
 
-  case class Record(id: Int, person: Person)
+  final case class Record(id: Int, person: Person)
 
   class SimpleMessage(s: String) extends TestSerializable
 
@@ -83,7 +81,7 @@ object SerializationTests {
 
   class FooActor extends Actor {
     def receive = {
-      case s: String ⇒ sender ! s
+      case s: String ⇒ sender() ! s
     }
   }
 
@@ -93,7 +91,7 @@ object SerializationTests {
 
   class NonSerializableActor(system: ActorSystem) extends Actor {
     def receive = {
-      case s: String ⇒ sender ! s
+      case s: String ⇒ sender() ! s
     }
   }
 
@@ -250,7 +248,7 @@ class SerializeSpec extends AkkaSpec(SerializationTests.serializeConf) {
 
       intercept[IllegalArgumentException] {
         byteSerializer.toBinary("pigdog")
-      }.getMessage should equal("ByteArraySerializer only serializes byte arrays, not [pigdog]")
+      }.getMessage should be("ByteArraySerializer only serializes byte arrays, not [pigdog]")
     }
   }
 }
@@ -271,11 +269,6 @@ class VerifySerializabilitySpec extends AkkaSpec(SerializationTests.verifySerial
 
     val b = system.actorOf(Props(new FooActor))
     system stop b
-
-    val c = system.actorOf(Props.empty.withCreator(new UntypedActorFactory {
-      def create() = new FooUntypedActor
-    }))
-    system stop c
 
     intercept[IllegalArgumentException] {
       val d = system.actorOf(Props(new NonSerializableActor(system)))
@@ -331,7 +324,7 @@ class SerializationCompatibilitySpec extends AkkaSpec(SerializationTests.mostlyR
 
   "Cross-version serialization compatibility" must {
     def verify(obj: SystemMessage, asExpected: String): Unit =
-      String.valueOf(ser.serialize(obj).map(encodeHex).get) should equal(asExpected)
+      String.valueOf(ser.serialize(obj).map(encodeHex).get) should be(asExpected)
 
     "be preserved for the Create SystemMessage" in {
       // Using null as the cause to avoid a large serialized message and JDK differences
@@ -431,6 +424,6 @@ protected[akka] class TestSerializer extends Serializer {
 }
 
 @SerialVersionUID(1)
-protected[akka] case class FakeThrowable(msg: String) extends Throwable(msg) with Serializable {
+protected[akka] final case class FakeThrowable(msg: String) extends Throwable(msg) with Serializable {
   override def fillInStackTrace = null
 }

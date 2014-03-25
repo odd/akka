@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote.routing
 
@@ -29,7 +29,7 @@ object RemoteRoundRobinMultiJvmSpec extends MultiNodeConfig {
 
   class SomeActor extends Actor {
     def receive = {
-      case "hit" ⇒ sender ! self
+      case "hit" ⇒ sender() ! self
     }
   }
 
@@ -141,7 +141,7 @@ class RemoteRoundRobinSpec extends MultiNodeSpec(RemoteRoundRobinMultiJvmSpec)
           (for (n ← 3 to 9) yield {
             // each message trigger a resize, incrementing number of routees with 1
             actor ! "hit"
-            Await.result(actor ? GetRoutees, remaining).asInstanceOf[Routees].routees.size should be(n)
+            Await.result(actor ? GetRoutees, timeout.duration).asInstanceOf[Routees].routees.size should be(n)
             expectMsgType[ActorRef]
           }).toSet
 
@@ -151,7 +151,7 @@ class RemoteRoundRobinSpec extends MultiNodeSpec(RemoteRoundRobinMultiJvmSpec)
         enterBarrier("end")
         repliesFrom.size should be(7)
         val repliesFromAddresses = repliesFrom.map(_.path.address)
-        repliesFromAddresses should equal(Set(node(first), node(second), node(third)).map(_.address))
+        repliesFromAddresses should be(Set(node(first), node(second), node(third)).map(_.address))
 
         // shut down the actor before we let the other node(s) shut down so we don't try to send
         // "Terminate" to a shut down node

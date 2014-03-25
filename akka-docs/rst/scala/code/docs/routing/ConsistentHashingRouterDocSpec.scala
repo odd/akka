@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package docs.routing
 
@@ -19,18 +19,18 @@ object ConsistentHashingRouterDocSpec {
 
     def receive = {
       case Entry(key, value) => cache += (key -> value)
-      case Get(key)          => sender ! cache.get(key)
+      case Get(key)          => sender() ! cache.get(key)
       case Evict(key)        => cache -= key
     }
   }
 
-  case class Evict(key: String)
+  final case class Evict(key: String)
 
-  case class Get(key: String) extends ConsistentHashable {
+  final case class Get(key: String) extends ConsistentHashable {
     override def consistentHashKey: Any = key
   }
 
-  case class Entry(key: String, value: String)
+  final case class Entry(key: String, value: String)
   //#cache-actor
 
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package docs.actor
 
@@ -21,12 +21,12 @@ class FSMDocSpec extends MyFavoriteTestFrameWorkPlusAkkaTestKit {
   //#simple-imports
   //#simple-events
   // received events
-  case class SetTarget(ref: ActorRef)
-  case class Queue(obj: Any)
+  final case class SetTarget(ref: ActorRef)
+  final case class Queue(obj: Any)
   case object Flush
 
   // sent events
-  case class Batch(obj: immutable.Seq[Any])
+  final case class Batch(obj: immutable.Seq[Any])
   //#simple-events
   //#simple-state
   // states
@@ -36,7 +36,7 @@ class FSMDocSpec extends MyFavoriteTestFrameWorkPlusAkkaTestKit {
 
   sealed trait Data
   case object Uninitialized extends Data
-  case class Todo(target: ActorRef, queue: immutable.Seq[Any]) extends Data
+  final case class Todo(target: ActorRef, queue: immutable.Seq[Any]) extends Data
   //#simple-state
   //#simple-fsm
   class Buncher extends Actor with FSM[State, Data] {

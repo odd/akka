@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.cluster
 
@@ -20,7 +20,7 @@ private[cluster] object AutoDown {
   def props(autoDownUnreachableAfter: FiniteDuration): Props =
     Props(classOf[AutoDown], autoDownUnreachableAfter)
 
-  case class UnreachableTimeout(node: UniqueAddress)
+  final case class UnreachableTimeout(node: UniqueAddress)
 }
 
 /**

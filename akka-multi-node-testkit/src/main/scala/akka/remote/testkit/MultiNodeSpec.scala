@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote.testkit
 
@@ -254,6 +254,15 @@ abstract class MultiNodeSpec(val myself: RoleName, _system: ActorSystem, _roles:
 
   val log: LoggingAdapter = Logging(system, this.getClass)
 
+  /**
+   * Enrich `.await()` onto all Awaitables, using remaining duration from the innermost
+   * enclosing `within` block or QueryTimeout.
+   */
+  implicit def awaitHelper[T](w: Awaitable[T]) = new AwaitHelper(w)
+  class AwaitHelper[T](w: Awaitable[T]) {
+    def await: T = Await.result(w, remainingOr(testConductor.Settings.QueryTimeout.duration))
+  }
+
   final override def multiNodeSpecBeforeAll {
     atStartup()
   }
@@ -264,6 +273,7 @@ abstract class MultiNodeSpec(val myself: RoleName, _system: ActorSystem, _roles:
       testConductor.removeNode(myself)
       within(testConductor.Settings.BarrierTimeout.duration) {
         awaitCond {
+          // Await.result(testConductor.getNodes, remaining).filterNot(_ == myself).isEmpty
           testConductor.getNodes.await.filterNot(_ == myself).isEmpty
         }
       }
@@ -317,7 +327,7 @@ abstract class MultiNodeSpec(val myself: RoleName, _system: ActorSystem, _roles:
    * been started either in Conductor or Player mode when the constructor of
    * MultiNodeSpec finishes, i.e. do not call the start*() methods yourself!
    */
-  val testConductor: TestConductorExt = TestConductor(system)
+  var testConductor: TestConductorExt = null
 
   /**
    * Execute the given block of code only on the given nodes (names according
@@ -361,66 +371,90 @@ abstract class MultiNodeSpec(val myself: RoleName, _system: ActorSystem, _roles:
       else messageClasses foreach mute
     }
 
-  /**
-   * Enrich `.await()` onto all Awaitables, using remaining duration from the innermost
-   * enclosing `within` block or QueryTimeout.
-   */
-  implicit def awaitHelper[T](w: Awaitable[T]) = new AwaitHelper(w)
-  class AwaitHelper[T](w: Awaitable[T]) {
-    def await: T = Await.result(w, remainingOr(testConductor.Settings.QueryTimeout.duration))
-  }
-
   /*
    * Implementation (i.e. wait for start etc.)
    */
 
   private val controllerAddr = new InetSocketAddress(serverName, serverPort)
-  if (selfIndex == 0) {
-    Await.result(testConductor.startController(initialParticipants, myself, controllerAddr),
-      testConductor.Settings.BarrierTimeout.duration)
-  } else {
-    Await.result(testConductor.startClient(myself, controllerAddr),
-      testConductor.Settings.BarrierTimeout.duration)
+
+  protected def attachConductor(tc: TestConductorExt): Unit = {
+    val timeout = tc.Settings.BarrierTimeout.duration
+    val startFuture =
+      if (selfIndex == 0) tc.startController(initialParticipants, myself, controllerAddr)
+      else tc.startClient(myself, controllerAddr)
+    try Await.result(startFuture, timeout)
+    catch {
+      case NonFatal(x) ⇒ throw new RuntimeException("failure while attaching new conductor", x)
+    }
+    testConductor = tc
   }
+
+  attachConductor(TestConductor(system))
 
   // now add deployments, if so desired
 
-  private case class Replacement(tag: String, role: RoleName) {
+  private final case class Replacement(tag: String, role: RoleName) {
     lazy val addr = node(role).address.toString
   }
+
   private val replacements = roles map (r ⇒ Replacement("@" + r.name + "@", r))
-  private val deployer = system.asInstanceOf[ExtendedActorSystem].provider.deployer
-  deployments(myself) foreach { str ⇒
-    val deployString = (str /: replacements) {
-      case (base, r @ Replacement(tag, _)) ⇒
-        base.indexOf(tag) match {
-          case -1 ⇒ base
-          case start ⇒
-            val replaceWith = try
-              r.addr
-            catch {
-              case NonFatal(e) ⇒
-                // might happen if all test cases are ignored (excluded) and
-                // controller node is finished/exited before r.addr is run
-                // on the other nodes
-                val unresolved = "akka://unresolved-replacement-" + r.role.name
-                log.warning(unresolved + " due to: " + e.getMessage)
-                unresolved
-            }
-            base.replace(tag, replaceWith)
-        }
-    }
-    import scala.collection.JavaConverters._
-    ConfigFactory.parseString(deployString).root.asScala foreach {
-      case (key, value: ConfigObject) ⇒ deployer.parseConfig(key, value.toConfig) foreach deployer.deploy
-      case (key, x)                   ⇒ throw new IllegalArgumentException(s"key $key must map to deployment section, not simple value $x")
+
+  protected def injectDeployments(sys: ActorSystem, role: RoleName): Unit = {
+    val deployer = sys.asInstanceOf[ExtendedActorSystem].provider.deployer
+    deployments(role) foreach { str ⇒
+      val deployString = (str /: replacements) {
+        case (base, r @ Replacement(tag, _)) ⇒
+          base.indexOf(tag) match {
+            case -1 ⇒ base
+            case start ⇒
+              val replaceWith = try
+                r.addr
+              catch {
+                case NonFatal(e) ⇒
+                  // might happen if all test cases are ignored (excluded) and
+                  // controller node is finished/exited before r.addr is run
+                  // on the other nodes
+                  val unresolved = "akka://unresolved-replacement-" + r.role.name
+                  log.warning(unresolved + " due to: " + e.getMessage)
+                  unresolved
+              }
+              base.replace(tag, replaceWith)
+          }
+      }
+      import scala.collection.JavaConverters._
+      ConfigFactory.parseString(deployString).root.asScala foreach {
+        case (key, value: ConfigObject) ⇒ deployer.parseConfig(key, value.toConfig) foreach deployer.deploy
+        case (key, x)                   ⇒ throw new IllegalArgumentException(s"key $key must map to deployment section, not simple value $x")
+      }
     }
   }
 
-  // useful to see which jvm is running which role, used by LogRoleReplace utility
-  log.info("Role [{}] started with address [{}]", myself.name,
-    system.asInstanceOf[ExtendedActorSystem].provider.asInstanceOf[RemoteActorRefProvider].transport.defaultAddress)
+  injectDeployments(system, myself)
 
+  protected val myAddress = system.asInstanceOf[ExtendedActorSystem].provider.getDefaultAddress
+
+  // useful to see which jvm is running which role, used by LogRoleReplace utility
+  log.info("Role [{}] started with address [{}]", myself.name, myAddress)
+
+  /**
+   * This method starts a new ActorSystem with the same configuration as the
+   * previous one on the current node, including deployments. It also creates
+   * a new TestConductor client and registers itself with the conductor so
+   * that it is possible to use barriers etc. normally after this method has
+   * been called.
+   *
+   * NOTICE: you MUST start a new system before trying to enter a barrier or
+   * otherwise using the TestConductor after having terminated this node’s
+   * system.
+   */
+  protected def startNewSystem(): ActorSystem = {
+    val config = ConfigFactory.parseString(s"akka.remote.netty.tcp{port=${myAddress.port.get}\nhostname=${myAddress.host.get}}")
+      .withFallback(system.settings.config)
+    val sys = ActorSystem(system.name, config)
+    injectDeployments(sys, myself)
+    attachConductor(TestConductor(sys))
+    sys
+  }
 }
 
 /**

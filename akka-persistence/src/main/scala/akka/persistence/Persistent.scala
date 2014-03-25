@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.persistence
@@ -12,7 +12,6 @@ import scala.collection.immutable
 import akka.actor.{ ActorContext, ActorRef }
 import akka.japi.Util.immutableSeq
 import akka.pattern.PromiseActorRef
-import akka.persistence.JournalProtocol.Confirm
 import akka.persistence.serialization.Message
 
 /**
@@ -107,7 +106,7 @@ object ConfirmablePersistent {
  * journal. The processor receives the written messages individually as [[Persistent]] messages.
  * During recovery, they are also replayed individually.
  */
-case class PersistentBatch(persistentBatch: immutable.Seq[Persistent]) extends Message {
+final case class PersistentBatch(persistentBatch: immutable.Seq[Persistent]) extends Message {
   /**
    * INTERNAL API.
    */
@@ -116,13 +115,42 @@ case class PersistentBatch(persistentBatch: immutable.Seq[Persistent]) extends M
 }
 
 /**
+ * Plugin API: confirmation entry written by journal plugins.
+ */
+trait PersistentConfirmation {
+  def processorId: String
+  def channelId: String
+  def sequenceNr: Long
+}
+
+/**
+ * Plugin API: persistent message identifier.
+ */
+trait PersistentId {
+  /**
+   * Id of processor that journals a persistent message
+   */
+  def processorId: String
+
+  /**
+   * A persistent message's sequence number.
+   */
+  def sequenceNr: Long
+}
+
+/**
+ * INTERNAL API.
+ */
+private[persistence] final case class PersistentIdImpl(processorId: String, sequenceNr: Long) extends PersistentId
+
+/**
  * Plugin API: representation of a persistent message in the journal plugin API.
  *
- * @see[[SyncWriteJournal]]
- * @see[[AsyncWriteJournal]]
- * @see[[AsyncReplay]]
+ * @see [[journal.SyncWriteJournal]]
+ * @see [[journal.AsyncWriteJournal]]
+ * @see [[journal.AsyncRecovery]]
  */
-trait PersistentRepr extends Persistent with Message {
+trait PersistentRepr extends Persistent with PersistentId with Message {
   import scala.collection.JavaConverters._
 
   /**
@@ -131,26 +159,9 @@ trait PersistentRepr extends Persistent with Message {
   def payload: Any
 
   /**
-   * This persistent message's seuence number.
-   */
-  def sequenceNr: Long
-
-  /**
-   * Id of processor that journals the message
-   */
-  def processorId: String
-
-  /**
    * `true` if this message is marked as deleted.
    */
   def deleted: Boolean
-
-  /**
-   * `true` by default, `false` for replayed messages. Set to `true` by a channel if this
-   * message is replayed and its sender reference was resolved. Channels use this field to
-   * avoid redundant sender reference resolutions.
-   */
-  def resolved: Boolean
 
   /**
    * Number of redeliveries. Only greater than zero if message has been redelivered by a [[Channel]]
@@ -178,7 +189,7 @@ trait PersistentRepr extends Persistent with Message {
   /**
    * Delivery confirmation message.
    */
-  def confirmMessage: Confirm
+  def confirmMessage: Delivered
 
   /**
    * Delivery confirmation message.
@@ -202,16 +213,15 @@ trait PersistentRepr extends Persistent with Message {
     prepareWrite(if (sender.isInstanceOf[PromiseActorRef]) context.system.deadLetters else sender)
 
   /**
-   * INTERNAL API.
+   * Creates a new copy of this [[PersistentRepr]].
    */
-  private[persistence] def update(
+  def update(
     sequenceNr: Long = sequenceNr,
     processorId: String = processorId,
     deleted: Boolean = deleted,
-    resolved: Boolean = resolved,
     redeliveries: Int = redeliveries,
     confirms: immutable.Seq[String] = confirms,
-    confirmMessage: Confirm = confirmMessage,
+    confirmMessage: Delivered = confirmMessage,
     confirmTarget: ActorRef = confirmTarget,
     sender: ActorRef = sender): PersistentRepr
 }
@@ -230,14 +240,13 @@ object PersistentRepr {
     sequenceNr: Long = 0L,
     processorId: String = PersistentRepr.Undefined,
     deleted: Boolean = false,
-    resolved: Boolean = true,
     redeliveries: Int = 0,
     confirms: immutable.Seq[String] = Nil,
     confirmable: Boolean = false,
-    confirmMessage: Confirm = null,
+    confirmMessage: Delivered = null,
     confirmTarget: ActorRef = null,
     sender: ActorRef = null) =
-    if (confirmable) ConfirmablePersistentImpl(payload, sequenceNr, processorId, deleted, resolved, redeliveries, confirms, confirmMessage, confirmTarget, sender)
+    if (confirmable) ConfirmablePersistentImpl(payload, sequenceNr, processorId, deleted, redeliveries, confirms, confirmMessage, confirmTarget, sender)
     else PersistentImpl(payload, sequenceNr, processorId, deleted, confirms, sender)
 
   /**
@@ -257,7 +266,7 @@ object PersistentBatch {
 /**
  * INTERNAL API.
  */
-private[persistence] case class PersistentImpl(
+private[persistence] final case class PersistentImpl(
   payload: Any,
   sequenceNr: Long,
   processorId: String,
@@ -275,33 +284,30 @@ private[persistence] case class PersistentImpl(
     sequenceNr: Long,
     processorId: String,
     deleted: Boolean,
-    resolved: Boolean,
     redeliveries: Int,
     confirms: immutable.Seq[String],
-    confirmMessage: Confirm,
+    confirmMessage: Delivered,
     confirmTarget: ActorRef,
     sender: ActorRef) =
     copy(sequenceNr = sequenceNr, processorId = processorId, deleted = deleted, confirms = confirms, sender = sender)
 
-  val resolved: Boolean = false
   val redeliveries: Int = 0
   val confirmable: Boolean = false
-  val confirmMessage: Confirm = null
+  val confirmMessage: Delivered = null
   val confirmTarget: ActorRef = null
 }
 
 /**
  * INTERNAL API.
  */
-private[persistence] case class ConfirmablePersistentImpl(
+private[persistence] final case class ConfirmablePersistentImpl(
   payload: Any,
   sequenceNr: Long,
   processorId: String,
   deleted: Boolean,
-  resolved: Boolean,
   redeliveries: Int,
   confirms: immutable.Seq[String],
-  confirmMessage: Confirm,
+  confirmMessage: Delivered,
   confirmTarget: ActorRef,
   sender: ActorRef) extends ConfirmablePersistent with PersistentRepr {
 
@@ -314,16 +320,16 @@ private[persistence] case class ConfirmablePersistentImpl(
   def confirmable = true
 
   def prepareWrite(sender: ActorRef) =
-    copy(sender = sender, resolved = false, confirmMessage = null, confirmTarget = null)
+    copy(sender = sender, confirmMessage = null, confirmTarget = null)
 
-  def update(sequenceNr: Long, processorId: String, deleted: Boolean, resolved: Boolean, redeliveries: Int, confirms: immutable.Seq[String], confirmMessage: Confirm, confirmTarget: ActorRef, sender: ActorRef) =
-    copy(sequenceNr = sequenceNr, processorId = processorId, deleted = deleted, resolved = resolved, redeliveries = redeliveries, confirms = confirms, confirmMessage = confirmMessage, confirmTarget = confirmTarget, sender = sender)
+  def update(sequenceNr: Long, processorId: String, deleted: Boolean, redeliveries: Int, confirms: immutable.Seq[String], confirmMessage: Delivered, confirmTarget: ActorRef, sender: ActorRef) =
+    copy(sequenceNr = sequenceNr, processorId = processorId, deleted = deleted, redeliveries = redeliveries, confirms = confirms, confirmMessage = confirmMessage, confirmTarget = confirmTarget, sender = sender)
 }
 
 /**
  * INTERNAL API.
  */
 private[persistence] object ConfirmablePersistentImpl {
-  def apply(persistent: PersistentRepr, confirmMessage: Confirm, confirmTarget: ActorRef = null): ConfirmablePersistentImpl =
-    ConfirmablePersistentImpl(persistent.payload, persistent.sequenceNr, persistent.processorId, persistent.deleted, persistent.resolved, persistent.redeliveries, persistent.confirms, confirmMessage, confirmTarget, persistent.sender)
+  def apply(persistent: PersistentRepr, confirmMessage: Delivered, confirmTarget: ActorRef = null): ConfirmablePersistentImpl =
+    ConfirmablePersistentImpl(persistent.payload, persistent.sequenceNr, persistent.processorId, persistent.deleted, persistent.redeliveries, persistent.confirms, confirmMessage, confirmTarget, persistent.sender)
 }

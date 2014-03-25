@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -22,7 +22,7 @@ import akka.dispatch.AbstractNodeQueue
  * This exception is thrown by Scheduler.schedule* when scheduling is not
  * possible, e.g. after shutting down the Scheduler.
  */
-private case class SchedulerException(msg: String) extends akka.AkkaException(msg) with NoStackTrace
+private final case class SchedulerException(msg: String) extends akka.AkkaException(msg) with NoStackTrace
 
 // The Scheduler trait is included in the documentation. KEEP THE LINES SHORT!!!
 //#scheduler
@@ -185,15 +185,16 @@ class LightArrayRevolverScheduler(config: Config,
   extends Scheduler with Closeable {
 
   import Helpers.Requiring
+  import Helpers.ConfigOps
 
   val WheelSize =
     config.getInt("akka.scheduler.ticks-per-wheel")
       .requiring(ticks ⇒ (ticks & (ticks - 1)) == 0, "ticks-per-wheel must be a power of 2")
   val TickDuration =
-    Duration(config.getMilliseconds("akka.scheduler.tick-duration"), MILLISECONDS)
+    config.getMillisDuration("akka.scheduler.tick-duration")
       .requiring(_ >= 10.millis || !Helpers.isWindows, "minimum supported akka.scheduler.tick-duration on Windows is 10ms")
       .requiring(_ >= 1.millis, "minimum supported akka.scheduler.tick-duration is 1ms")
-  val ShutdownTimeout = Duration(config.getMilliseconds("akka.scheduler.shutdown-timeout"), MILLISECONDS)
+  val ShutdownTimeout = config.getMillisDuration("akka.scheduler.shutdown-timeout")
 
   import LightArrayRevolverScheduler._
 

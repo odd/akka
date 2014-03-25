@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.testkit
 
@@ -67,7 +67,7 @@ class AkkaSpecSpec extends WordSpec with Matchers {
         val davyJones = otherSystem.actorOf(Props(new Actor {
           def receive = {
             case m: DeadLetter ⇒ locker :+= m
-            case "Die!"        ⇒ sender ! "finally gone"; context.stop(self)
+            case "Die!"        ⇒ sender() ! "finally gone"; context.stop(self)
           }
         }), "davyJones")
 
@@ -88,7 +88,7 @@ class AkkaSpecSpec extends WordSpec with Matchers {
         system.registerOnTermination(latch.countDown())
         TestKit.shutdownActorSystem(system)
         Await.ready(latch, 2 seconds)
-        Await.result(davyJones ? "Die!", timeout.duration) should equal("finally gone")
+        Await.result(davyJones ? "Die!", timeout.duration) should be("finally gone")
 
         // this will typically also contain log messages which were sent after the logger shutdown
         locker should contain(DeadLetter(42, davyJones, probe.ref))

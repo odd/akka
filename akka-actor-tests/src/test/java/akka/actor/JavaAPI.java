@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor;
@@ -7,7 +7,7 @@ package akka.actor;
 import akka.event.Logging;
 import akka.event.Logging.LoggerInitialized;
 import akka.japi.Creator;
-import akka.routing.CurrentRoutees;
+import akka.routing.GetRoutees;
 import akka.routing.FromConfig;
 import akka.routing.NoRouter;
 import akka.testkit.AkkaJUnitActorSystemResource;
@@ -38,7 +38,7 @@ public class JavaAPI {
 
     final LoggerInitialized x = Logging.loggerInitialized();
 
-    final CurrentRoutees r = CurrentRoutees.getInstance();
+    final GetRoutees r = GetRoutees.getInstance();
     final NoRouter nr = NoRouter.getInstance();
     final FromConfig fc = FromConfig.getInstance();
   }
@@ -49,13 +49,32 @@ public class JavaAPI {
     assertNotNull(ref);
   }
 
-  @Test
-  public void mustBeAbleToCreateActorRefFromFactory() {
-    ActorRef ref = system.actorOf(Props.empty().withCreator(new Creator<Actor>() {
+  public static Props mkProps() {
+    return Props.create(new Creator<Actor>() {
       public Actor create() {
         return new JavaAPITestActor();
       }
-    }));
+    });
+  }
+
+  @SuppressWarnings("unchecked")
+  public static Props mkErasedProps() {
+    return Props.create(JavaAPITestActor.class, new Creator() {
+      public Object create() {
+        return new JavaAPITestActor();
+      }
+    });
+  }
+
+  @Test
+  public void mustBeAbleToCreateActorRefFromFactory() {
+    ActorRef ref = system.actorOf(mkProps());
+    assertNotNull(ref);
+  }
+
+  @Test
+  public void mustBeAbleToCreateActorRefFromErasedFactory() {
+    ActorRef ref = system.actorOf(mkErasedProps());
     assertNotNull(ref);
   }
 

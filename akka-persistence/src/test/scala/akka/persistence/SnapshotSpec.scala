@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.persistence
@@ -29,8 +29,8 @@ object SnapshotSpec {
     override def preStart() = ()
   }
 
-  case class Delete1(metadata: SnapshotMetadata)
-  case class DeleteN(criteria: SnapshotSelectionCriteria)
+  final case class Delete1(metadata: SnapshotMetadata)
+  final case class DeleteN(criteria: SnapshotSelectionCriteria)
 
   class DeleteSnapshotTestProcessor(name: String, probe: ActorRef) extends LoadSnapshotTestProcessor(name, probe) {
     override def receive = {

@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.cluster
@@ -16,7 +16,7 @@ import akka.cluster.ClusterEvent._
 import akka.testkit.AkkaSpec
 
 object AutoDownSpec {
-  case class DownCalled(address: Address)
+  final case class DownCalled(address: Address)
 
   val memberA = TestMember(Address("akka.tcp", "sys", "a", 2552), Up)
   val memberB = TestMember(Address("akka.tcp", "sys", "b", 2552), Up)

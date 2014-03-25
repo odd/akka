@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.cluster.routing
@@ -18,7 +18,6 @@ import akka.pattern.ask
 import akka.remote.testkit.{ MultiNodeSpec, MultiNodeConfig }
 import akka.routing.GetRoutees
 import akka.routing.FromConfig
-import akka.routing.RouterRoutees
 import akka.testkit.{ LongRunningTest, DefaultTimeout, ImplicitSender }
 import akka.routing.ActorRefRoutee
 import akka.routing.Routees
@@ -27,7 +26,7 @@ object AdaptiveLoadBalancingRouterMultiJvmSpec extends MultiNodeConfig {
 
   class Echo extends Actor {
     def receive = {
-      case _ ⇒ sender ! Reply(Cluster(context.system).selfAddress)
+      case _ ⇒ sender() ! Reply(Cluster(context.system).selfAddress)
     }
   }
 
@@ -45,12 +44,12 @@ object AdaptiveLoadBalancingRouterMultiJvmSpec extends MultiNodeConfig {
         val numberOfArrays = allocateBytes / 1024
         usedMemory = Array.ofDim(numberOfArrays, 248) // each 248 element Int array will use ~ 1 kB
         log.debug("used heap after: [{}] bytes", ManagementFactory.getMemoryMXBean.getHeapMemoryUsage.getUsed)
-        sender ! "done"
+        sender() ! "done"
     }
   }
 
   case object AllocateMemory
-  case class Reply(address: Address)
+  final case class Reply(address: Address)
 
   val first = role("first")
   val second = role("second")
@@ -62,12 +61,12 @@ object AdaptiveLoadBalancingRouterMultiJvmSpec extends MultiNodeConfig {
       akka.cluster.metrics.moving-average-half-life = 2s
       akka.actor.deployment {
         /router3 = {
-          router = adaptive
+          router = adaptive-pool
           metrics-selector = cpu
           nr-of-instances = 9
         }
         /router4 = {
-          router = adaptive
+          router = adaptive-pool
           metrics-selector = "akka.cluster.routing.TestCustomMetricsSelector"
           nr-of-instances = 10
           cluster {
@@ -94,7 +93,7 @@ abstract class AdaptiveLoadBalancingRouterSpec extends MultiNodeSpec(AdaptiveLoa
   import AdaptiveLoadBalancingRouterMultiJvmSpec._
 
   def currentRoutees(router: ActorRef) =
-    Await.result(router ? GetRoutees, remaining).asInstanceOf[Routees].routees
+    Await.result(router ? GetRoutees, timeout.duration).asInstanceOf[Routees].routees
 
   def receiveReplies(expectedReplies: Int): Map[Address, Int] = {
     val zero = Map.empty[Address, Int] ++ roles.map(address(_) -> 0)

@@ -65,52 +65,22 @@ example of a parametric factory could be:
 
 .. includecode:: code/docs/actor/UntypedActorDocTest.java#parametric-creator
 
-Deprecated Variants
-^^^^^^^^^^^^^^^^^^^
+.. note::
 
-Up to Akka 2.1 there were also the following possibilities (which are retained
-for a migration period):
-
-.. includecode:: code/docs/actor/UntypedActorDocTest.java#import-untypedActor
-.. includecode:: code/docs/actor/UntypedActorDocTest.java#creating-props-deprecated
-
-The last two are deprecated because their functionality is available in full
-through :meth:`Props.create()`.
-
-The first two are deprecated because the resulting :class:`UntypedActorFactory`
-is typically a local class which means that it implicitly carries a reference
-to the enclosing class. This can easily make the resulting :class:`Props`
-non-serializable, e.g. when the enclosing class is an :class:`Actor`. Akka
-advocates location transparency, meaning that an application written with
-actors should just work when it is deployed over multiple network nodes, and
-non-serializable actor factories would break this principle. In case indirect
-actor creation is needed—for example when using dependency injection—there is
-the possibility to use an :class:`IndirectActorProducer` as described below.
-
-There were two use-cases for these methods: passing constructor arguments to
-the actor—which is solved by the newly introduced :meth:`Props.create()` method
-above—and creating actors “on the spot” as anonymous classes. The latter should
-be solved by making these actors named inner classes instead (if they are not
-``static`` then the enclosing instance’s ``this`` reference needs to be passed
-as the first argument).
-
-.. warning::
-
-  Declaring one actor within another is very dangerous and breaks actor
-  encapsulation unless the nested actor is a static inner class. Never pass an
-  actor’s ``this`` reference into :class:`Props`!
+  In order for mailbox requirements—like using a deque-based mailbox for actors
+  using the stash—to be picked up, the actor type needs to be known before
+  creating it, which is what the :class:`Creator` type argument allows.
+  Therefore make sure to use the specific type for your actors wherever
+  possible.
 
 Recommended Practices
 ^^^^^^^^^^^^^^^^^^^^^
 
 It is a good idea to provide static factory methods on the
 :class:`UntypedActor` which help keeping the creation of suitable
-:class:`Props` as close to the actor definition as possible, thus containing
-the gap in type-safety introduced by reflective instantiation within a single
-class instead of spreading it out across a whole code-base. This helps
-especially when refactoring the actor’s constructor signature at a later point,
-where compiler checks will allow this modification to be done with greater
-confidence than without.
+:class:`Props` as close to the actor definition as possible. This also allows
+usage of the :class:`Creator`-based methods which statically verify that the
+used constructor actually exists instead relying only on a runtime check.
 
 .. includecode:: code/docs/actor/UntypedActorDocTest.java#props-factory
 
@@ -179,9 +149,9 @@ __ Props_
   singleton scope.
 
 Techniques for dependency injection and integration with dependency injection frameworks
-are described in more depth in the 
-`Using Akka with Dependency Injection <http://letitcrash.com/post/55958814293/akka-dependency-injection>`_ 
-guideline and the `Akka Java Spring <http://typesafe.com/activator/template/akka-java-spring>`_ tutorial
+are described in more depth in the
+`Using Akka with Dependency Injection <http://letitcrash.com/post/55958814293/akka-dependency-injection>`_
+guideline and the `Akka Java Spring <http://www.typesafe.com/activator/template/akka-java-spring>`_ tutorial
 in Typesafe Activator.
 
 The Inbox
@@ -215,11 +185,11 @@ to have them converted into actual Debug messages).
 
 In addition, it offers:
 
-* :obj:`getSelf()` reference to the :class:`ActorRef` of the actor
+* :meth:`getSelf()` reference to the :class:`ActorRef` of the actor
 
-* :obj:`getSender()` reference sender Actor of the last received message, typically used as described in :ref:`UntypedActor.Reply`
+* :meth:`getSender()` reference sender Actor of the last received message, typically used as described in :ref:`UntypedActor.Reply`
 
-* :obj:`supervisorStrategy()` user overridable definition the strategy to use for supervising child actors
+* :meth:`supervisorStrategy()` user overridable definition the strategy to use for supervising child actors
 
   This strategy is typically declared inside the actor in order to have access
   to the actor’s internal state within the decider function: since failure is
@@ -230,7 +200,7 @@ In addition, it offers:
   occurred within a distant descendant it is still reported one level up at a
   time).
 
-* :obj:`getContext()` exposes contextual information for the actor and the current message, such as:
+* :meth:`getContext()` exposes contextual information for the actor and the current message, such as:
 
   * factory methods to create child actors (:meth:`actorOf`)
   * system that the actor belongs to
@@ -246,6 +216,8 @@ described in the following:
 
 The implementations shown above are the defaults provided by the :class:`UntypedActor`
 class.
+
+.. _actor-lifecycle-java:
 
 Actor Lifecycle
 ---------------
@@ -280,7 +252,7 @@ occupying it. ``ActorSelection`` cannot be watched for this reason. It is
 possible to resolve the current incarnation's ``ActorRef`` living under the
 path by sending an ``Identify`` message to the ``ActorSelection`` which
 will be replied to with an ``ActorIdentity`` containing the correct reference
-(see :ref:`actorSelection-java`). This can also be done with the ``resolveOne`` 
+(see :ref:`actorSelection-java`). This can also be done with the ``resolveOne``
 method of the :class:`ActorSelection`, which returns a ``Future`` of the matching
 :class:`ActorRef`.
 
@@ -303,8 +275,8 @@ the whole functionality):
 
 It should be noted that the :class:`Terminated` message is generated
 independent of the order in which registration and termination occur.
-In particular, the watching actor will receive a :class:`Terminated` message even if the 
-watched actor has already been terminated at the time of registration.
+In particular, the watching actor will receive a :class:`Terminated` message
+even if the watched actor has already been terminated at the time of registration.
 
 Registering multiple times does not necessarily lead to multiple messages being
 generated, but there is no guarantee that only exactly one such message is
@@ -432,12 +404,12 @@ actors which are traversed in the sense that if a concrete name lookup fails
 negative result is generated. Please note that this does not mean that delivery
 of that reply is guaranteed, it still is a normal message.
 
-.. includecode:: code/docs/actor/UntypedActorDocTest.java
-   :include: import-identify,identify
+.. includecode:: code/docs/actor/UntypedActorDocTest.java#import-identify
+.. includecode:: code/docs/actor/UntypedActorDocTest.java#identify
 
 You can also acquire an :class:`ActorRef` for an :class:`ActorSelection` with
-the ``resolveOne`` method of the :class:`ActorSelection`. It returns a ``Future`` 
-of the matching :class:`ActorRef` if such an actor exists. It is completed with 
+the ``resolveOne`` method of the :class:`ActorSelection`. It returns a ``Future``
+of the matching :class:`ActorRef` if such an actor exists. It is completed with
 failure [[akka.actor.ActorNotFound]] if no such actor exists or the identification
 didn't complete within the supplied `timeout`.
 
@@ -694,9 +666,17 @@ termination of several actors:
 .. includecode:: code/docs/actor/UntypedActorDocTest.java
    :include: gracefulStop
 
+.. includecode:: code/docs/actor/UntypedActorDocTest.java
+   :include: gracefulStop-actor
+
 When ``gracefulStop()`` returns successfully, the actor’s ``postStop()`` hook
 will have been executed: there exists a happens-before edge between the end of
 ``postStop()`` and the return of ``gracefulStop()``.
+
+In the above example a custom ``Manager.SHUTDOWN`` message is sent to the target
+actor to initiate the process of stopping the actor. You can use ``PoisonPill`` for
+this, but then you have limited possibilities to perform interactions with other actors
+before stopping the target actor. Simple cleanup tasks can be handled in ``postStop``.
 
 .. warning::
 
@@ -794,7 +774,7 @@ major impact on performance.
 
 Note that the stash is part of the ephemeral actor state, unlike the
 mailbox. Therefore, it should be managed like other parts of the
-actor's state which have the same property. The :class:`Stash` trait’s
+actor's state which have the same property. The :class:`UntypedActorWithStash`
 implementation of :meth:`preRestart` will call ``unstashAll()``, which is
 usually the desired behavior.
 

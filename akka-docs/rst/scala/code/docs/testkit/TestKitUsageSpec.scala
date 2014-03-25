@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package docs.testkit
 
@@ -45,7 +45,7 @@ class TestKitUsageSpec
     system.actorOf(Props(classOf[SequencingActor], testActor, headList, tailList))
 
   override def afterAll {
-    shutdown(system)
+    shutdown()
   }
 
   "An EchoActor" should {
@@ -117,7 +117,7 @@ object TestKitUsageSpec {
    */
   class EchoActor extends Actor {
     def receive = {
-      case msg => sender ! msg
+      case msg => sender() ! msg
     }
   }
 

@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.contrib.throttle
@@ -14,44 +14,10 @@ import java.util.concurrent.TimeUnit
 import akka.AkkaException
 
 /**
- * == Throttling ==
- * A <em>throttler</em> is an actor that is defined through a <em>target actor</em> and a <em>rate</em>
- * (of type [[akka.contrib.throttle.Throttler.Rate]]). You set or change the target and rate at any time through the `SetTarget(target)`
- * and `SetRate(rate)` messages, respectively. When you send the throttler any other message `msg`, it will
- * put the message `msg` into an internal queue and eventually send all queued messages to the target, at
- * a speed that respects the given rate. If no target is currently defined then the messages will be queued
- * and will be delivered as soon as a target gets set.
- *
- * A throttler understands actor messages of type
- * [[akka.contrib.throttle.Throttler.SetTarget]], [[akka.contrib.throttle.Throttler.SetRate]], in
- * addition to any other messages, which the throttler will consider as messages to be sent to
- * the target.
- *
- * == Transparency ==
- * Notice that the throttler `forward`s messages, i.e., the target will see the original message sender (and not the throttler) as the sender of the message.
- *
- * == Persistence ==
- * Throttlers usually use an internal queue to keep the messages that need to be sent to the target.
- * You therefore cannot rely on the throttler's inbox size in order to learn how much messages are
- * outstanding.
- *
- * It is left to the implementation whether the internal queue is persisted over application restarts or
- * actor failure.
- *
- * == Processing messages ==
- * The target should process messages as fast as possible. If the target requires substantial time to
- * process messages, it should distribute its work to other actors (using for example something like
- * a `BalancingDispatcher`), otherwise the resulting system will always work <em>below</em>
- * the threshold rate.
- *
- * <em>Example:</em> Suppose the throttler has a rate of 3msg/s and the target requires 1s to process a message.
- * This system will only process messages at a rate of 1msg/s: the target will receive messages at at most 3msg/s
- * but as it handles them synchronously and each of them takes 1s, its inbox will grow and grow. In such
- * a situation, the target should <em>distribute</em> its messages to a set of worker actors so that individual messages
- * can be handled in parallel.
- *
  * @see [[akka.contrib.throttle.TimerBasedThrottler]]
  * @see [[akka.contrib.throttle.Throttler.Rate]]
+ * @see [[akka.contrib.throttle.Throttler.SetRate]]
+ * @see [[akka.contrib.throttle.Throttler.SetTarget]]
  */
 object Throttler {
   /**
@@ -74,7 +40,7 @@ object Throttler {
    * @param duration the length of the period
    * @see [[akka.contrib.throttle.Throttler]]
    */
-  case class Rate(val numberOfCalls: Int, val duration: FiniteDuration) {
+  final case class Rate(val numberOfCalls: Int, val duration: FiniteDuration) {
     /**
      * The duration in milliseconds.
      */
@@ -94,7 +60,7 @@ object Throttler {
    *  and eventually be delivered when a new target is set. If `target` is not `None`, the currently queued messages
    *  as well as any messages received in the future will be delivered to the new target at a rate not exceeding the current throttler's rate.
    */
-  case class SetTarget(target: Option[ActorRef]) {
+  final case class SetTarget(target: Option[ActorRef]) {
     /**
      * Java API:
      * @param target if `target` is `null`, the throttler will stop delivering messages and the messages already received
@@ -113,7 +79,7 @@ object Throttler {
    *
    * @param rate the rate at which messages will be delivered to the target of the throttler
    */
-  case class SetRate(rate: Rate)
+  final case class SetRate(rate: Rate)
 
   import language.implicitConversions
 
@@ -144,16 +110,54 @@ private[throttle] object TimerBasedThrottler {
   case object Active extends State
 
   // Messages, as we queue them to be sent later
-  case class Message(message: Any, sender: ActorRef)
+  final case class Message(message: Any, sender: ActorRef)
 
   // The data of the FSM
-  case class Data(target: Option[ActorRef],
-                  callsLeftInThisPeriod: Int,
-                  queue: Q[Message])
+  final case class Data(target: Option[ActorRef],
+                        callsLeftInThisPeriod: Int,
+                        queue: Q[Message])
 }
 
 /**
  * A throttler that uses a timer to control the message delivery rate.
+ *
+ * == Throttling ==
+ * A <em>throttler</em> is an actor that is defined through a <em>target actor</em> and a <em>rate</em>
+ * (of type [[akka.contrib.throttle.Throttler.Rate]]). You set or change the target and rate at any time through the
+ * [[akka.contrib.throttle.Throttler.SetTarget]] and [[akka.contrib.throttle.Throttler.SetRate]]
+ * messages, respectively. When you send the throttler any other message `msg`, it will
+ * put the message `msg` into an internal queue and eventually send all queued messages to the target, at
+ * a speed that respects the given rate. If no target is currently defined then the messages will be queued
+ * and will be delivered as soon as a target gets set.
+ *
+ * A throttler understands actor messages of type
+ * [[akka.contrib.throttle.Throttler.SetTarget]], [[akka.contrib.throttle.Throttler.SetRate]], in
+ * addition to any other messages, which the throttler will consider as messages to be sent to
+ * the target.
+ *
+ * == Transparency ==
+ * Notice that the throttler `forward`s messages, i.e., the target will see the original message sender
+ * (and not the throttler) as the sender of the message.
+ *
+ * == Persistence ==
+ * Throttlers usually use an internal queue to keep the messages that need to be sent to the target.
+ * You therefore cannot rely on the throttler's inbox size in order to learn how much messages are
+ * outstanding.
+ *
+ * It is left to the implementation whether the internal queue is persisted over application restarts or
+ * actor failure.
+ *
+ * == Processing messages ==
+ * The target should process messages as fast as possible. If the target requires substantial time to
+ * process messages, it should distribute its work to other actors (using for example something like
+ * a `BalancingDispatcher`), otherwise the resulting system will always work <em>below</em>
+ * the threshold rate.
+ *
+ * <em>Example:</em> Suppose the throttler has a rate of 3msg/s and the target requires 1s to process a message.
+ * This system will only process messages at a rate of 1msg/s: the target will receive messages at at most 3msg/s
+ * but as it handles them synchronously and each of them takes 1s, its inbox will grow and grow. In such
+ * a situation, the target should <em>distribute</em> its messages to a set of worker actors so that individual messages
+ * can be handled in parallel.
  *
  * ==Example==
  * For example, if you set a rate like "3 messages in 1 second", the throttler
@@ -231,9 +235,9 @@ class TimerBasedThrottler(var rate: Rate) extends Actor with FSM[State, Data] {
 
     // Queuing
     case Event(msg, d @ Data(None, _, queue)) ⇒
-      stay using d.copy(queue = queue.enqueue(Message(msg, context.sender)))
+      stay using d.copy(queue = queue.enqueue(Message(msg, context.sender())))
     case Event(msg, d @ Data(Some(_), _, Seq())) ⇒
-      goto(Active) using deliverMessages(d.copy(queue = Q(Message(msg, context.sender))))
+      goto(Active) using deliverMessages(d.copy(queue = Q(Message(msg, context.sender()))))
     // Note: The case Event(msg, t @ Data(Some(_), _, _, Seq(_*))) should never happen here.
   }
 
@@ -269,11 +273,11 @@ class TimerBasedThrottler(var rate: Rate) extends Actor with FSM[State, Data] {
 
     // Queue a message (when we cannot send messages in the current period anymore)
     case Event(msg, d @ Data(_, 0, queue)) ⇒
-      stay using d.copy(queue = queue.enqueue(Message(msg, context.sender)))
+      stay using d.copy(queue = queue.enqueue(Message(msg, context.sender())))
 
     // Queue a message (when we can send some more messages in the current period)
     case Event(msg, d @ Data(_, _, queue)) ⇒
-      stay using deliverMessages(d.copy(queue = queue.enqueue(Message(msg, context.sender))))
+      stay using deliverMessages(d.copy(queue = queue.enqueue(Message(msg, context.sender()))))
   }
 
   onTransition {

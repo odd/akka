@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor.dungeon
@@ -16,6 +16,7 @@ import scala.collection.immutable
 import scala.concurrent.duration.Duration
 import scala.util.control.Exception._
 import scala.util.control.NonFatal
+import akka.actor.ActorRefScope
 
 private[akka] trait FaultHandling { this: ActorCell ⇒
 
@@ -148,6 +149,14 @@ private[akka] trait FaultHandling { this: ActorCell ⇒
     // stop all children, which will turn childrenRefs into TerminatingChildrenContainer (if there are children)
     children foreach stop
 
+    if (systemImpl.aborting) {
+      // separate iteration because this is a very rare case that should not penalize normal operation
+      children foreach {
+        case ref: ActorRefScope if !ref.isLocal ⇒ self.sendSystemMessage(DeathWatchNotification(ref, true, false))
+        case _                                  ⇒
+      }
+    }
+
     val wasTerminating = isTerminating
 
     if (setChildrenTerminationReason(ChildrenContainer.Termination)) {
@@ -202,7 +211,7 @@ private[akka] trait FaultHandling { this: ActorCell ⇒
     catch handleNonFatalOrInterruptedException { e ⇒ publish(Error(e, self.path.toString, clazz(a), e.getMessage)) }
     finally try dispatcher.detach(this)
     finally try parent.sendSystemMessage(DeathWatchNotification(self, existenceConfirmed = true, addressTerminated = false))
-    finally try tellWatchersWeDied(a)
+    finally try tellWatchersWeDied()
     finally try unwatchWatchedActors(a) // stay here as we expect an emergency stop from handleInvokeFailure
     finally {
       if (system.settings.DebugLifecycle)

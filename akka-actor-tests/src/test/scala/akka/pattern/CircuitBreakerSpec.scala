@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.pattern
@@ -33,8 +33,9 @@ object CircuitBreakerSpec {
   def longCallTimeoutCb()(implicit system: ActorSystem, ec: ExecutionContext): Breaker =
     new Breaker(new CircuitBreaker(system.scheduler, 1, 5 seconds, 500.millis.dilated))
 
+  val longResetTimeout = 5.seconds
   def longResetTimeoutCb()(implicit system: ActorSystem, ec: ExecutionContext): Breaker =
-    new Breaker(new CircuitBreaker(system.scheduler, 1, 100.millis.dilated, 5 seconds))
+    new Breaker(new CircuitBreaker(system.scheduler, 1, 100.millis.dilated, longResetTimeout))
 
   def multiFailureCb()(implicit system: ActorSystem, ec: ExecutionContext): Breaker =
     new Breaker(new CircuitBreaker(system.scheduler, 5, 200.millis.dilated, 500.millis.dilated))
@@ -62,7 +63,9 @@ class CircuitBreakerSpec extends AkkaSpec with BeforeAndAfter {
 
       checkLatch(breaker.openLatch)
 
-      intercept[CircuitBreakerOpenException] { breaker().withSyncCircuitBreaker(sayHi) }
+      val e = intercept[CircuitBreakerOpenException] { breaker().withSyncCircuitBreaker(sayHi) }
+      (e.remainingDuration > Duration.Zero) should be(true)
+      (e.remainingDuration <= CircuitBreakerSpec.longResetTimeout) should be(true)
     }
 
     "transition to half-open on reset timeout" in {
@@ -111,15 +114,15 @@ class CircuitBreakerSpec extends AkkaSpec with BeforeAndAfter {
         val ct = Thread.currentThread() // Ensure that the thunk is executed in the tests thread
         breaker().withSyncCircuitBreaker({ if (Thread.currentThread() eq ct) throwException else "fail" })
       }
-      breaker().currentFailureCount should equal(1)
+      breaker().currentFailureCount should be(1)
       breaker().withSyncCircuitBreaker(sayHi)
-      breaker().currentFailureCount should equal(0)
+      breaker().currentFailureCount should be(0)
     }
 
     "increment failure count on callTimeout" in {
       val breaker = CircuitBreakerSpec.shortCallTimeoutCb()
       breaker().withSyncCircuitBreaker(Thread.sleep(100.millis.dilated.toMillis))
-      awaitCond(breaker().currentFailureCount == 1, remaining)
+      awaitCond(breaker().currentFailureCount == 1)
     }
   }
 

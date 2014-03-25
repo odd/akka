@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package docs.actor
 
@@ -13,13 +13,12 @@ import akka.event.Logging
 //#imports1
 
 import scala.concurrent.Future
-import akka.actor.{ ActorRef, ActorSystem }
+import akka.actor.{ ActorRef, ActorSystem, PoisonPill, Terminated, ActorLogging }
 import org.scalatest.{ BeforeAndAfterAll, WordSpec }
 import org.scalatest.Matchers
 import akka.testkit._
 import akka.util._
 import scala.concurrent.duration._
-import akka.actor.Actor.Receive
 import scala.concurrent.Await
 
 //#my-actor
@@ -32,15 +31,15 @@ class MyActor extends Actor {
 }
 //#my-actor
 
-case class DoIt(msg: ImmutableMessage)
-case class Message(s: String)
+final case class DoIt(msg: ImmutableMessage)
+final case class Message(s: String)
 
 //#context-actorOf
 class FirstActor extends Actor {
   val child = context.actorOf(Props[MyActor], name = "myChild")
   //#plus-some-behavior
   def receive = {
-    case x => sender ! x
+    case x => sender() ! x
   }
   //#plus-some-behavior
 }
@@ -59,38 +58,28 @@ class DemoActorWrapper extends Actor {
      * @return a Props for creating this actor, which can then be further configured
      *         (e.g. calling `.withDispatcher()` on it)
      */
-    def props(magicNumber: Int): Props = Props(classOf[DemoActor], magicNumber)
+    def props(magicNumber: Int): Props = Props(new DemoActor(magicNumber))
   }
 
   class DemoActor(magicNumber: Int) extends Actor {
     def receive = {
-      case x: Int => sender ! (x + magicNumber)
+      case x: Int => sender() ! (x + magicNumber)
     }
   }
 
-  // ...
-
-  context.actorOf(DemoActor.props(42), "demo")
+  class SomeOtherActor extends Actor {
+    // Props(new DemoActor(42)) would not be safe
+    context.actorOf(DemoActor.props(42), "demo")
+    // ...
+    //#props-factory
+    def receive = {
+      case msg =>
+    }
+    //#props-factory
+  }
   //#props-factory
 
   def receive = Actor.emptyBehavior
-}
-
-class AnonymousActor extends Actor {
-  //#anonymous-actor
-  def receive = {
-    case m: DoIt =>
-      context.actorOf(Props(new Actor {
-        def receive = {
-          case DoIt(msg) =>
-            val replyMsg = doSomeDangerousWork(msg)
-            sender ! replyMsg
-            context.stop(self)
-        }
-        def doSomeDangerousWork(msg: ImmutableMessage): String = { "done" }
-      })) forward m
-  }
-  //#anonymous-actor
 }
 
 class Hook extends Actor {
@@ -116,10 +105,10 @@ class ReplyException extends Actor {
       //#reply-exception
       try {
         val result = operation()
-        sender ! result
+        sender() ! result
       } catch {
         case e: Exception =>
-          sender ! akka.actor.Status.Failure(e)
+          sender() ! akka.actor.Status.Failure(e)
           throw e
       }
     //#reply-exception
@@ -127,6 +116,36 @@ class ReplyException extends Actor {
 
   def operation(): String = { "Hi" }
 
+}
+
+//#gracefulStop-actor
+object Manager {
+  case object Shutdown
+}
+
+class Manager extends Actor {
+  import Manager._
+  val worker = context.watch(context.actorOf(Props[Cruncher], "worker"))
+
+  def receive = {
+    case "job" => worker ! "crunch"
+    case Shutdown =>
+      worker ! PoisonPill
+      context become shuttingDown
+  }
+
+  def shuttingDown: Receive = {
+    case "job" => sender() ! "service unavailable, shutting down"
+    case Terminated(`worker`) =>
+      context stop self
+  }
+}
+//#gracefulStop-actor
+
+class Cruncher extends Actor {
+  def receive = {
+    case "crunch" => // crunch...
+  }
 }
 
 //#swapper
@@ -160,25 +179,45 @@ object SwapperApp extends App {
 
 //#receive-orElse
 
-abstract class GenericActor extends Actor {
-  // to be defined in subclassing actor
-  def specificMessageHandler: Receive
+trait ProducerBehavior {
+  this: Actor =>
 
-  // generic message handler
-  def genericMessageHandler: Receive = {
-    case event => printf("generic: %s\n", event)
-  }
-
-  def receive = specificMessageHandler orElse genericMessageHandler
-}
-
-class SpecificActor extends GenericActor {
-  def specificMessageHandler = {
-    case event: MyMsg => printf("specific: %s\n", event.subject)
+  val producerBehavior: Receive = {
+    case GiveMeThings =>
+      sender() ! Give("thing")
   }
 }
 
-case class MyMsg(subject: String)
+trait ConsumerBehavior {
+  this: Actor with ActorLogging =>
+
+  val consumerBehavior: Receive = {
+    case ref: ActorRef =>
+      ref ! GiveMeThings
+
+    case Give(thing) =>
+      log.info("Got a thing! It's {}", thing)
+  }
+}
+
+class Producer extends Actor with ProducerBehavior {
+  def receive = producerBehavior
+}
+
+class Consumer extends Actor with ActorLogging with ConsumerBehavior {
+  def receive = consumerBehavior
+}
+
+class ProducerConsumer extends Actor with ActorLogging
+  with ProducerBehavior with ConsumerBehavior {
+
+  def receive = producerBehavior orElse consumerBehavior
+}
+
+// protocol
+case object GiveMeThings
+final case class Give(thing: Any)
+
 //#receive-orElse
 
 class ActorDocSpec extends AkkaSpec(Map("akka.loglevel" -> "INFO")) {
@@ -225,36 +264,18 @@ class ActorDocSpec extends AkkaSpec(Map("akka.loglevel" -> "INFO")) {
     system.stop(myActor)
   }
 
-  "creating actor with constructor" in {
-    //#creating-constructor
-    // allows passing in arguments to the MyActor constructor
-    val myActor = system.actorOf(Props[MyActor], name = "myactor")
-    //#creating-constructor
-
-    system.stop(myActor)
-  }
-
   "creating a Props config" in {
     //#creating-props
     import akka.actor.Props
 
     val props1 = Props[MyActor]
+    val props2 = Props(new ActorWithArgs("arg")) // careful, see below
     val props3 = Props(classOf[ActorWithArgs], "arg")
     //#creating-props
 
     //#creating-props-deprecated
-    // DEPRECATED: old case class signature
-    val props4 = Props(
-      creator = { () => new MyActor },
-      dispatcher = "my-dispatcher")
-
-    // DEPRECATED due to duplicate functionality with Props.apply()
-    val props5 = props1.withCreator(new MyActor)
-
-    // DEPRECATED due to duplicate functionality with Props.apply()
-    val props6 = props1.withCreator(classOf[MyActor])
-
-    // NOT RECOMMENDED: encourages to close over enclosing class
+    // NOT RECOMMENDED within another actor:
+    // encourages to close over enclosing class
     val props7 = Props(new MyActor)
     //#creating-props-deprecated
   }
@@ -273,7 +294,7 @@ class ActorDocSpec extends AkkaSpec(Map("akka.loglevel" -> "INFO")) {
   "creating actor with IndirectActorProducer" in {
     class Echo(name: String) extends Actor {
       def receive = {
-        case n: Int => sender ! name
+        case n: Int => sender() ! name
         case message =>
           val target = testActor
           //#forward
@@ -305,7 +326,10 @@ class ActorDocSpec extends AkkaSpec(Map("akka.loglevel" -> "INFO")) {
         "helloBean")
       //#creating-indirectly
     }
-    val actorRef = a.actorRef
+    val actorRef = {
+      import scala.language.reflectiveCalls
+      a.actorRef
+    }
 
     val message = 42
     implicit val self = testActor
@@ -364,12 +388,12 @@ class ActorDocSpec extends AkkaSpec(Map("akka.loglevel" -> "INFO")) {
   class HotSwapActor extends Actor {
     import context._
     def angry: Receive = {
-      case "foo" => sender ! "I am already angry?"
+      case "foo" => sender() ! "I am already angry?"
       case "bar" => become(happy)
     }
 
     def happy: Receive = {
-      case "bar" => sender ! "I am already happy :-)"
+      case "bar" => sender() ! "I am already happy :-)"
       case "foo" => become(angry)
     }
 
@@ -416,7 +440,7 @@ class ActorDocSpec extends AkkaSpec(Map("akka.loglevel" -> "INFO")) {
 
         def receive = {
           case "kill" =>
-            context.stop(child); lastSender = sender
+            context.stop(child); lastSender = sender()
           case Terminated(`child`) => lastSender ! "finished"
         }
       }
@@ -474,18 +498,18 @@ class ActorDocSpec extends AkkaSpec(Map("akka.loglevel" -> "INFO")) {
       val b = system.actorOf(Props(classOf[Follower], this))
       watch(b)
       system.stop(a)
-      expectMsgType[akka.actor.Terminated].actor should equal(b)
+      expectMsgType[akka.actor.Terminated].actor should be(b)
     }
   }
 
   "using pattern gracefulStop" in {
-    val actorRef = system.actorOf(Props[MyActor])
+    val actorRef = system.actorOf(Props[Manager])
     //#gracefulStop
     import akka.pattern.gracefulStop
     import scala.concurrent.Await
 
     try {
-      val stopped: Future[Boolean] = gracefulStop(actorRef, 5 seconds)
+      val stopped: Future[Boolean] = gracefulStop(actorRef, 5 seconds, Manager.Shutdown)
       Await.result(stopped, 6 seconds)
       // the actor has been stopped
     } catch {
@@ -500,7 +524,7 @@ class ActorDocSpec extends AkkaSpec(Map("akka.loglevel" -> "INFO")) {
     //#ask-pipeTo
     import akka.pattern.{ ask, pipe }
     import system.dispatcher // The ExecutionContext that will be used
-    case class Result(x: Int, s: String, d: Double)
+    final case class Result(x: Int, s: String, d: Double)
     case object Request
 
     implicit val timeout = Timeout(5 seconds) // needed for `?` below
@@ -521,12 +545,12 @@ class ActorDocSpec extends AkkaSpec(Map("akka.loglevel" -> "INFO")) {
     def receive = {
       case ref: ActorRef =>
         //#reply-with-sender
-        sender.tell("reply", context.parent) // replies will go back to parent
-        sender.!("reply")(context.parent) // alternative syntax (beware of the parens!)
+        sender().tell("reply", context.parent) // replies will go back to parent
+        sender().!("reply")(context.parent) // alternative syntax (beware of the parens!)
       //#reply-with-sender
       case x =>
         //#reply-without-sender
-        sender ! x // replies will go to this actor
+        sender() ! x // replies will go to this actor
       //#reply-without-sender
     }
   }
@@ -536,12 +560,12 @@ class ActorDocSpec extends AkkaSpec(Map("akka.loglevel" -> "INFO")) {
     implicit val me = testActor
     actor ! 42
     expectMsg(42)
-    lastSender should equal(actor)
+    lastSender should be(actor)
     actor ! me
     expectMsg("reply")
-    lastSender.path.elements.mkString("/", "/", "") should equal("/user")
+    lastSender.path.toStringWithoutAddress should be("/user")
     expectMsg("reply")
-    lastSender.path.elements.mkString("/", "/", "") should equal("/user")
+    lastSender.path.toStringWithoutAddress should be("/user")
   }
 
   "using ActorDSL outside of akka.actor package" in {
@@ -550,61 +574,6 @@ class ActorDocSpec extends AkkaSpec(Map("akka.loglevel" -> "INFO")) {
       superviseWith(OneForOneStrategy() { case _ => Stop; Restart; Resume; Escalate })
       superviseWith(AllForOneStrategy() { case _ => Stop; Restart; Resume; Escalate })
     })
-  }
-
-  //#receive-orElse2
-  class PartialFunctionBuilder[A, B] {
-    import scala.collection.immutable.Vector
-
-    // Abbreviate to make code fit
-    type PF = PartialFunction[A, B]
-
-    private var pfsOption: Option[Vector[PF]] = Some(Vector.empty)
-
-    private def mapPfs[C](f: Vector[PF] => (Option[Vector[PF]], C)): C = {
-      pfsOption.fold(throw new IllegalStateException("Already built"))(f) match {
-        case (newPfsOption, result) => {
-          pfsOption = newPfsOption
-          result
-        }
-      }
-    }
-
-    def +=(pf: PF): Unit =
-      mapPfs { case pfs => (Some(pfs :+ pf), ()) }
-
-    def result(): PF =
-      mapPfs { case pfs => (None, pfs.foldLeft[PF](Map.empty) { _ orElse _ }) }
-  }
-
-  trait ComposableActor extends Actor {
-    protected lazy val receiveBuilder = new PartialFunctionBuilder[Any, Unit]
-    final def receive = receiveBuilder.result()
-  }
-
-  trait TheirComposableActor extends ComposableActor {
-    receiveBuilder += {
-      case "foo" => sender ! "foo received"
-    }
-  }
-
-  class MyComposableActor extends TheirComposableActor {
-    receiveBuilder += {
-      case "bar" => sender ! "bar received"
-    }
-  }
-  //#receive-orElse2
-
-  "using ComposableActor" in {
-    val composed = system.actorOf(Props(classOf[MyComposableActor], this))
-    implicit val me = testActor
-    composed ! "foo"
-    expectMsg("foo received")
-    composed ! "bar"
-    expectMsg("bar received")
-    EventFilter.warning(pattern = ".*unhandled message from.*baz", occurrences = 1) intercept {
-      composed ! "baz"
-    }
   }
 
 }

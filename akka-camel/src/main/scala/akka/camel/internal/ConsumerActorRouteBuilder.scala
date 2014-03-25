@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.camel.internal
@@ -9,6 +9,8 @@ import akka.camel._
 import akka.camel.internal.component.CamelPath
 import org.apache.camel.builder.RouteBuilder
 import org.apache.camel.model.RouteDefinition
+
+import scala.language.existentials
 
 /**
  * INTERNAL API

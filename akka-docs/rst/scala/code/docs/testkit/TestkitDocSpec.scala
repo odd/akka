@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package docs.testkit
 
@@ -22,8 +22,8 @@ object TestkitDocSpec {
 
   class MyActor extends Actor {
     def receive = {
-      case Say42       => sender ! 42
-      case "some work" => sender ! "some result"
+      case Say42       => sender() ! 42
+      case "some work" => sender() ! "some result"
     }
   }
 
@@ -74,7 +74,10 @@ object TestkitDocSpec {
     //#logging-receive
     import akka.event.LoggingReceive
     def receive = LoggingReceive {
-      case msg => // Do something...
+      case msg => // Do something ...
+    }
+    def otherState: Receive = LoggingReceive.withLabel("other") {
+      case msg => // Do something else ...
     }
     //#logging-receive
   }
@@ -194,14 +197,14 @@ class TestkitDocSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
     //#test-probe
 
     //#test-special-probe
-    case class Update(id: Int, value: String)
+    final case class Update(id: Int, value: String)
 
     val probe = new TestProbe(system) {
       def expectUpdate(x: Int) = {
         expectMsgPF() {
           case Update(id, _) if id == x => true
         }
-        sender ! "ACK"
+        sender() ! "ACK"
       }
     }
     //#test-special-probe

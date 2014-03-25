@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.event
 
@@ -69,7 +69,7 @@ object LoggerSpec {
       }
     """).withFallback(AkkaSpec.testConf)
 
-  case class SetTarget(ref: ActorRef, qualifier: Int)
+  final case class SetTarget(ref: ActorRef, qualifier: Int)
 
   class TestLogger1 extends TestLogger(1)
   class TestLogger2 extends TestLogger(2)
@@ -78,7 +78,7 @@ object LoggerSpec {
     override def receive: Receive = {
       case InitializeLogger(bus) ⇒
         bus.subscribe(context.self, classOf[SetTarget])
-        sender ! LoggerInitialized
+        sender() ! LoggerInitialized
       case SetTarget(ref, `qualifier`) ⇒
         target = Some(ref)
         ref ! ("OK")

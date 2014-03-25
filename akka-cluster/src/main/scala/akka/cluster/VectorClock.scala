@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.cluster
@@ -70,7 +70,7 @@ private[cluster] object VectorClock {
  * Based on code from the 'vlock' VectorClock library by Coda Hale.
  */
 @SerialVersionUID(1L)
-case class VectorClock(
+final case class VectorClock(
   versions: TreeMap[VectorClock.Node, Long] = TreeMap.empty[VectorClock.Node, Long]) {
 
   import VectorClock._

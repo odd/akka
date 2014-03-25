@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote.transport
 
@@ -80,7 +80,7 @@ object ThrottlerTransportAdapter {
   }
 
   @SerialVersionUID(1L)
-  case class SetThrottle(address: Address, direction: Direction, mode: ThrottleMode)
+  final case class SetThrottle(address: Address, direction: Direction, mode: ThrottleMode)
 
   @SerialVersionUID(1L)
   case object SetThrottleAck {
@@ -96,7 +96,7 @@ object ThrottlerTransportAdapter {
   }
 
   @SerialVersionUID(1L)
-  case class TokenBucket(capacity: Int, tokensPerSecond: Double, nanoTimeOfLastSend: Long, availableTokens: Int)
+  final case class TokenBucket(capacity: Int, tokensPerSecond: Double, nanoTimeOfLastSend: Long, availableTokens: Int)
     extends ThrottleMode {
 
     private def isAvailable(nanoTimeOfSend: Long, tokens: Int): Boolean =
@@ -148,7 +148,7 @@ object ThrottlerTransportAdapter {
    * Management Command to force dissocation of an address.
    */
   @SerialVersionUID(1L)
-  case class ForceDisassociate(address: Address)
+  final case class ForceDisassociate(address: Address)
 
   @SerialVersionUID(1L)
   case object ForceDisassociateAck {
@@ -183,16 +183,16 @@ class ThrottlerTransportAdapter(_wrappedTransport: Transport, _system: ExtendedA
  * INTERNAL API
  */
 private[transport] object ThrottlerManager {
-  case class Checkin(origin: Address, handle: ThrottlerHandle) extends NoSerializationVerificationNeeded
+  final case class Checkin(origin: Address, handle: ThrottlerHandle) extends NoSerializationVerificationNeeded
 
-  case class AssociateResult(handle: AssociationHandle, statusPromise: Promise[AssociationHandle])
+  final case class AssociateResult(handle: AssociationHandle, statusPromise: Promise[AssociationHandle])
     extends NoSerializationVerificationNeeded
 
-  case class ListenerAndMode(listener: HandleEventListener, mode: ThrottleMode) extends NoSerializationVerificationNeeded
+  final case class ListenerAndMode(listener: HandleEventListener, mode: ThrottleMode) extends NoSerializationVerificationNeeded
 
-  case class Handle(handle: ThrottlerHandle) extends NoSerializationVerificationNeeded
+  final case class Handle(handle: ThrottlerHandle) extends NoSerializationVerificationNeeded
 
-  case class Listener(listener: HandleEventListener) extends NoSerializationVerificationNeeded
+  final case class Listener(listener: HandleEventListener) extends NoSerializationVerificationNeeded
 }
 
 /**
@@ -234,14 +234,14 @@ private[transport] class ThrottlerManager(wrappedTransport: Transport) extends A
       Future.sequence(handleTable map {
         case (`naked`, handle) ⇒ setMode(handle, mode, direction)
         case _                 ⇒ ok
-      }).map(_ ⇒ SetThrottleAck) pipeTo sender
+      }).map(_ ⇒ SetThrottleAck) pipeTo sender()
     case ForceDisassociate(address) ⇒
       val naked = nakedAddress(address)
       handleTable foreach {
         case (`naked`, handle) ⇒ handle.disassociate()
         case _                 ⇒
       }
-      sender ! ForceDisassociateAck
+      sender() ! ForceDisassociateAck
 
     case Checkin(origin, handle) ⇒
       val naked: Address = nakedAddress(origin)
@@ -337,7 +337,7 @@ private[transport] object ThrottledAssociation {
 
   sealed trait ThrottlerData
   case object Uninitialized extends ThrottlerData
-  case class ExposedHandle(handle: ThrottlerHandle) extends ThrottlerData
+  final case class ExposedHandle(handle: ThrottlerHandle) extends ThrottlerData
 }
 
 /**
@@ -396,7 +396,7 @@ private[transport] class ThrottledAssociation(
         associationHandler notify InboundAssociation(exposedHandle)
         exposedHandle.readHandlerPromise.future.map(Listener(_)) pipeTo self
         goto(WaitUpstreamListener)
-      } finally sender ! SetThrottleAck
+      } finally sender() ! SetThrottleAck
   }
 
   when(WaitUpstreamListener) {
@@ -427,7 +427,7 @@ private[transport] class ThrottledAssociation(
       cancelTimer(DequeueTimerName)
       if (throttledMessages.nonEmpty)
         scheduleDequeue(inboundThrottleMode.timeToAvailable(System.nanoTime(), throttledMessages.head.length))
-      sender ! SetThrottleAck
+      sender() ! SetThrottleAck
       stay()
     case Event(InboundPayload(p), _) ⇒
       forwardOrDelay(p)
@@ -450,12 +450,10 @@ private[transport] class ThrottledAssociation(
     // we should always set the throttling mode
     case Event(mode: ThrottleMode, _) ⇒
       inboundThrottleMode = mode
-      sender ! SetThrottleAck
+      sender() ! SetThrottleAck
       stay()
     case Event(Disassociated(info), _) ⇒
-      if (upstreamListener ne null) upstreamListener notify Disassociated(info)
-      originalHandle.disassociate()
-      stop()
+      stop() // not notifying the upstream handler is intentional: we are relying on heartbeating
   }
 
   // This method captures ASSOCIATE packets and extracts the origin address
@@ -503,7 +501,7 @@ private[transport] class ThrottledAssociation(
 /**
  * INTERNAL API
  */
-private[transport] case class ThrottlerHandle(_wrappedHandle: AssociationHandle, throttlerActor: ActorRef)
+private[transport] final case class ThrottlerHandle(_wrappedHandle: AssociationHandle, throttlerActor: ActorRef)
   extends AbstractTransportAdapterHandle(_wrappedHandle, SchemeIdentifier) {
 
   private[transport] val outboundThrottleMode = new AtomicReference[ThrottleMode](Unthrottled)

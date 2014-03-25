@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -18,22 +18,22 @@ import akka.TestUtils.verifyActorTermination
 
 object ActorRefSpec {
 
-  case class ReplyTo(sender: ActorRef)
+  final case class ReplyTo(sender: ActorRef)
 
   class ReplyActor extends Actor {
     var replyTo: ActorRef = null
 
     def receive = {
       case "complexRequest" ⇒ {
-        replyTo = sender
+        replyTo = sender()
         val worker = context.actorOf(Props[WorkerActor])
         worker ! "work"
       }
       case "complexRequest2" ⇒
         val worker = context.actorOf(Props[WorkerActor])
-        worker ! ReplyTo(sender)
+        worker ! ReplyTo(sender())
       case "workDone"      ⇒ replyTo ! "complexReply"
-      case "simpleRequest" ⇒ sender ! "simpleReply"
+      case "simpleRequest" ⇒ sender() ! "simpleReply"
     }
   }
 
@@ -42,7 +42,7 @@ object ActorRefSpec {
     def receive = {
       case "work" ⇒ {
         work()
-        sender ! "workDone"
+        sender() ! "workDone"
         context.stop(self)
       }
       case ReplyTo(replyTo) ⇒ {
@@ -71,7 +71,7 @@ object ActorRefSpec {
 
   class OuterActor(val inner: ActorRef) extends Actor {
     def receive = {
-      case "self" ⇒ sender ! self
+      case "self" ⇒ sender() ! self
       case x      ⇒ inner forward x
     }
   }
@@ -80,7 +80,7 @@ object ActorRefSpec {
     val fail = new InnerActor
 
     def receive = {
-      case "self" ⇒ sender ! self
+      case "self" ⇒ sender() ! self
       case x      ⇒ inner forward x
     }
   }
@@ -91,8 +91,8 @@ object ActorRefSpec {
 
   class InnerActor extends Actor {
     def receive = {
-      case "innerself" ⇒ sender ! self
-      case other       ⇒ sender ! other
+      case "innerself" ⇒ sender() ! self
+      case other       ⇒ sender() ! other
     }
   }
 
@@ -100,8 +100,8 @@ object ActorRefSpec {
     val fail = new InnerActor
 
     def receive = {
-      case "innerself" ⇒ sender ! self
-      case other       ⇒ sender ! other
+      case "innerself" ⇒ sender() ! self
+      case other       ⇒ sender() ! other
     }
   }
 
@@ -139,7 +139,7 @@ class ActorRefSpec extends AkkaSpec with DefaultTimeout {
         new Actor { def receive = { case _ ⇒ } }
       }
 
-      def contextStackMustBeEmpty(): Unit = ActorCell.contextStack.get.headOption should equal(None)
+      def contextStackMustBeEmpty(): Unit = ActorCell.contextStack.get.headOption should be(None)
 
       EventFilter[ActorInitializationException](occurrences = 1) intercept {
         intercept[akka.actor.ActorInitializationException] {
@@ -249,7 +249,7 @@ class ActorRefSpec extends AkkaSpec with DefaultTimeout {
         (intercept[java.lang.IllegalStateException] {
           wrap(result ⇒
             actorOf(Props(new OuterActor(actorOf(Props(promiseIntercept({ throw new IllegalStateException("Ur state be b0rked"); new InnerActor })(result)))))))
-        }).getMessage should equal("Ur state be b0rked")
+        }).getMessage should be("Ur state be b0rked")
 
         contextStackMustBeEmpty()
       }
@@ -275,15 +275,15 @@ class ActorRefSpec extends AkkaSpec with DefaultTimeout {
         val in = new ObjectInputStream(new ByteArrayInputStream(bytes))
         val readA = in.readObject
 
-        a.isInstanceOf[ActorRefWithCell] should equal(true)
-        readA.isInstanceOf[ActorRefWithCell] should equal(true)
-        (readA eq a) should equal(true)
+        a.isInstanceOf[ActorRefWithCell] should be(true)
+        readA.isInstanceOf[ActorRefWithCell] should be(true)
+        (readA eq a) should be(true)
       }
 
       val ser = new JavaSerializer(esys)
       val readA = ser.fromBinary(bytes, None)
-      readA.isInstanceOf[ActorRefWithCell] should equal(true)
-      (readA eq a) should equal(true)
+      readA.isInstanceOf[ActorRefWithCell] should be(true)
+      (readA eq a) should be(true)
     }
 
     "throw an exception on deserialize if no system in scope" in {
@@ -303,7 +303,7 @@ class ActorRefSpec extends AkkaSpec with DefaultTimeout {
 
       (intercept[java.lang.IllegalStateException] {
         in.readObject
-      }).getMessage should equal("Trying to deserialize a serialized ActorRef without an ActorSystem in scope." +
+      }).getMessage should be("Trying to deserialize a serialized ActorRef without an ActorSystem in scope." +
         " Use 'akka.serialization.Serialization.currentSystem.withValue(system) { ... }'")
     }
 
@@ -328,20 +328,20 @@ class ActorRefSpec extends AkkaSpec with DefaultTimeout {
 
       JavaSerializer.currentSystem.withValue(sysImpl) {
         val in = new ObjectInputStream(new ByteArrayInputStream(baos.toByteArray))
-        in.readObject should equal(new EmptyLocalActorRef(sysImpl.provider, ref.path, system.eventStream))
+        in.readObject should be(new EmptyLocalActorRef(sysImpl.provider, ref.path, system.eventStream))
       }
     }
 
     "support nested actorOfs" in {
       val a = system.actorOf(Props(new Actor {
         val nested = system.actorOf(Props(new Actor { def receive = { case _ ⇒ } }))
-        def receive = { case _ ⇒ sender ! nested }
+        def receive = { case _ ⇒ sender() ! nested }
       }))
 
       val nested = Await.result((a ? "any").mapTo[ActorRef], timeout.duration)
       a should not be null
       nested should not be null
-      (a ne nested) should equal(true)
+      (a ne nested) should be(true)
     }
 
     "support advanced nested actorOfs" in {
@@ -352,7 +352,7 @@ class ActorRefSpec extends AkkaSpec with DefaultTimeout {
       Await.result(a ? "self", timeout.duration) should be(a)
       inner should not be a
 
-      Await.result(a ? "msg", timeout.duration) should equal("msg")
+      Await.result(a ? "msg", timeout.duration) should be("msg")
     }
 
     "support reply via sender" in {
@@ -388,11 +388,11 @@ class ActorRefSpec extends AkkaSpec with DefaultTimeout {
     }
 
     "stop when sent a poison pill" in {
-      val timeout = Timeout(20000)
+      val timeout = Timeout(20.seconds)
       val ref = system.actorOf(Props(new Actor {
         def receive = {
-          case 5 ⇒ sender ! "five"
-          case 0 ⇒ sender ! "null"
+          case 5 ⇒ sender() ! "five"
+          case 0 ⇒ sender() ! "null"
         }
       }))
 
@@ -438,11 +438,11 @@ class ActorRefSpec extends AkkaSpec with DefaultTimeout {
             def receive = { case _ ⇒ }
           }), "child")
 
-        def receive = { case name: String ⇒ sender ! context.child(name).isDefined }
+        def receive = { case name: String ⇒ sender() ! context.child(name).isDefined }
       }), "parent")
 
-      assert(Await.result((parent ? "child"), remaining) === true)
-      assert(Await.result((parent ? "whatnot"), remaining) === false)
+      assert(Await.result((parent ? "child"), timeout.duration) === true)
+      assert(Await.result((parent ? "whatnot"), timeout.duration) === false)
     }
   }
 }

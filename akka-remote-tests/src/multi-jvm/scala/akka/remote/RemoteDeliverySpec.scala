@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote
 
@@ -25,7 +25,7 @@ object RemoteDeliveryMultiJvmSpec extends MultiNodeConfig {
 
   commonConfig(debugConfig(on = false).withFallback(ConfigFactory.parseString("akka.loglevel=INFO")))
 
-  case class Letter(n: Int, route: List[ActorRef])
+  final case class Letter(n: Int, route: List[ActorRef])
 
   class Postman extends Actor {
     def receive = {

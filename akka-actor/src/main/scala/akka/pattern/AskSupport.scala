@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.pattern
 
@@ -322,7 +322,7 @@ private[akka] final class PromiseActorRef private (val provider: ActorRefProvide
 private[akka] object PromiseActorRef {
   private case object Registering
   private case object Stopped
-  private case class StoppedWithPath(path: ActorPath)
+  private final case class StoppedWithPath(path: ActorPath)
 
   def apply(provider: ActorRefProvider, timeout: Timeout, targetName: String): PromiseActorRef = {
     val result = Promise[Any]()
@@ -330,7 +330,7 @@ private[akka] object PromiseActorRef {
     val a = new PromiseActorRef(provider, result)
     implicit val ec = a.internalCallingThreadExecutionContext
     val f = scheduler.scheduleOnce(timeout.duration) {
-      result tryComplete Failure(new AskTimeoutException(s"Ask timed out on [$targetName]"))
+      result tryComplete Failure(new AskTimeoutException(s"Ask timed out on [$targetName] after [${timeout.duration.toMillis} ms]"))
     }
     result.future onComplete { _ ⇒ try a.stop() finally f.cancel() }
     a

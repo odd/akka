@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package docs.actor
 
@@ -44,7 +44,7 @@ object InitializationDocSpec {
     }
 
     def initialized: Receive = {
-      case "U OK?" => initializeMe foreach { sender ! _ }
+      case "U OK?" => initializeMe foreach { sender() ! _ }
     }
     //#messageInit
 

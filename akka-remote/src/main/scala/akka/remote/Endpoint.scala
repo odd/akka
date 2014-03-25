@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote
 
@@ -57,7 +57,7 @@ private[remote] class DefaultMessageDispatcher(private val system: ExtendedActor
     val sender: ActorRef = senderOption.getOrElse(system.deadLetters)
     val originalReceiver = recipient.path
 
-    def msgLog = s"RemoteMessage: [$payload] to [$recipient]<+[$originalReceiver] from [$sender]"
+    def msgLog = s"RemoteMessage: [$payload] to [$recipient]<+[$originalReceiver] from [$sender()]"
 
     recipient match {
 
@@ -120,21 +120,21 @@ private[remote] trait AssociationProblem
  * INTERNAL API
  */
 @SerialVersionUID(1L)
-private[remote] case class ShutDownAssociation(localAddress: Address, remoteAddress: Address, cause: Throwable)
+private[remote] final case class ShutDownAssociation(localAddress: Address, remoteAddress: Address, cause: Throwable)
   extends EndpointException("Shut down address: " + remoteAddress, cause) with AssociationProblem
 
 /**
  * INTERNAL API
  */
 @SerialVersionUID(1L)
-private[remote] case class InvalidAssociation(localAddress: Address, remoteAddress: Address, cause: Throwable)
+private[remote] final case class InvalidAssociation(localAddress: Address, remoteAddress: Address, cause: Throwable)
   extends EndpointException("Invalid address: " + remoteAddress, cause) with AssociationProblem
 
 /**
  * INTERNAL API
  */
 @SerialVersionUID(1L)
-private[remote] case class HopelessAssociation(localAddress: Address, remoteAddress: Address, uid: Option[Int], cause: Throwable)
+private[remote] final case class HopelessAssociation(localAddress: Address, remoteAddress: Address, uid: Option[Int], cause: Throwable)
   extends EndpointException("Catastrophic association error.") with AssociationProblem
 
 /**
@@ -161,7 +161,7 @@ private[remote] class OversizedPayloadException(msg: String) extends EndpointExc
 private[remote] object ReliableDeliverySupervisor {
   case object Ungate
   case object AttemptSysMsgRedelivery
-  case class GotUid(uid: Int)
+  final case class GotUid(uid: Int)
 
   def props(
     handleOrActive: Option[AkkaProtocolHandle],
@@ -187,11 +187,9 @@ private[remote] class ReliableDeliverySupervisor(
   val transport: AkkaProtocolTransport,
   val settings: RemoteSettings,
   val codec: AkkaPduCodec,
-  val receiveBuffers: ConcurrentHashMap[Link, ResendState]) extends Actor {
+  val receiveBuffers: ConcurrentHashMap[Link, ResendState]) extends Actor with ActorLogging {
   import ReliableDeliverySupervisor._
   import context.dispatcher
-
-  def retryGateEnabled = settings.RetryGateClosedFor > Duration.Zero
 
   var autoResendTimer: Option[Cancellable] = None
 
@@ -206,20 +204,16 @@ private[remote] class ReliableDeliverySupervisor(
     scheduleAutoResend()
   }
 
-  override val supervisorStrategy = OneForOneStrategy(settings.MaximumRetriesInWindow, settings.RetryWindow, loggingEnabled = false) {
+  override val supervisorStrategy = OneForOneStrategy(loggingEnabled = false) {
     case e @ (_: AssociationProblem) ⇒ Escalate
     case NonFatal(e) ⇒
+      log.warning("Association with remote system [{}] has failed, address is now gated for [{}] ms. Reason is: [{}].",
+        remoteAddress, settings.RetryGateClosedFor.toMillis, e.getMessage)
       uidConfirmed = false // Need confirmation of UID again
-      if (retryGateEnabled) {
-        context.become(gated)
-        context.system.scheduler.scheduleOnce(settings.RetryGateClosedFor, self, Ungate)
-        context.unwatch(writer)
-        currentHandle = None
-        context.parent ! StoppedReading(self)
-        Stop
-      } else {
-        Restart
-      }
+      context.become(gated)
+      currentHandle = None
+      context.parent ! StoppedReading(self)
+      Stop
   }
 
   var currentHandle: Option[AkkaProtocolHandle] = handleOrActive
@@ -247,6 +241,7 @@ private[remote] class ReliableDeliverySupervisor(
 
   var writer: ActorRef = createWriter()
   var uid: Option[Int] = handleOrActive map { _.handshakeInfo.uid }
+  val bailoutAt: Deadline = Deadline.now + settings.InitialSysMsgDeliveryTimeout
   // Processing of Acks has to be delayed until the UID after a reconnect is discovered. Depending whether the
   // UID matches the expected one, pending Acks can be processed, or must be dropped. It is guaranteed that for
   // any inbound connections (calling createWriter()) the first message from that connection is GotUid() therefore
@@ -311,7 +306,8 @@ private[remote] class ReliableDeliverySupervisor(
       if (resendBuffer.nonAcked.nonEmpty || resendBuffer.nacked.nonEmpty)
         context.system.scheduler.scheduleOnce(settings.SysResendTimeout, self, AttemptSysMsgRedelivery)
       context.become(idle)
-    case GotUid(receivedUid) ⇒
+    case g @ GotUid(receivedUid) ⇒
+      context.parent ! g
       // New system that has the same address as the old - need to start from fresh state
       uidConfirmed = true
       if (uid.exists(_ != receivedUid)) reset()
@@ -323,8 +319,18 @@ private[remote] class ReliableDeliverySupervisor(
   }
 
   def gated: Receive = {
+    case Terminated(_) ⇒
+      context.system.scheduler.scheduleOnce(settings.RetryGateClosedFor, self, Ungate)
     case Ungate ⇒
       if (resendBuffer.nonAcked.nonEmpty || resendBuffer.nacked.nonEmpty) {
+        // If we talk to a system we have not talked to before (or has given up talking to in the past) stop
+        // system delivery attempts after the specified time. This act will drop the pending system messages and gate the
+        // remote address at the EndpointManager level stopping this actor. In case the remote system becomes reachable
+        // again it will be immediately quarantined due to out-of-sync system message buffer and becomes quarantined.
+        // In other words, this action is safe.
+        if (!uidConfirmed && bailoutAt.isOverdue())
+          throw new InvalidAssociation(localAddress, remoteAddress,
+            new java.util.concurrent.TimeoutException("Delivery of system messages timed out and they were dropped."))
         writer = createWriter()
         // Resending will be triggered by the incoming GotUid message after the connection finished
         context.become(receive)
@@ -332,7 +338,7 @@ private[remote] class ReliableDeliverySupervisor(
     case s @ Send(msg: SystemMessage, _, _, _) ⇒ tryBuffer(s.copy(seqOpt = Some(nextSeq())))
     case s: Send                               ⇒ context.system.deadLetters ! s
     case EndpointWriter.FlushAndStop           ⇒ context.stop(self)
-    case EndpointWriter.StopReading(w)         ⇒ sender ! EndpointWriter.StoppedReading(w)
+    case EndpointWriter.StopReading(w)         ⇒ sender() ! EndpointWriter.StoppedReading(w)
     case _                                     ⇒ // Ignore
   }
 
@@ -347,7 +353,7 @@ private[remote] class ReliableDeliverySupervisor(
       // Resending will be triggered by the incoming GotUid message after the connection finished
       context.become(receive)
     case EndpointWriter.FlushAndStop   ⇒ context.stop(self)
-    case EndpointWriter.StopReading(w) ⇒ sender ! EndpointWriter.StoppedReading(w)
+    case EndpointWriter.StopReading(w) ⇒ sender() ! EndpointWriter.StoppedReading(w)
   }
 
   def flushWait: Receive = {
@@ -446,17 +452,17 @@ private[remote] object EndpointWriter {
    * used instead.
    * @param handle Handle of the new inbound association.
    */
-  case class TakeOver(handle: AkkaProtocolHandle) extends NoSerializationVerificationNeeded
-  case class TookOver(writer: ActorRef, handle: AkkaProtocolHandle) extends NoSerializationVerificationNeeded
+  final case class TakeOver(handle: AkkaProtocolHandle) extends NoSerializationVerificationNeeded
+  final case class TookOver(writer: ActorRef, handle: AkkaProtocolHandle) extends NoSerializationVerificationNeeded
   case object BackoffTimer
   case object FlushAndStop
   case object AckIdleCheckTimer
-  case class StopReading(writer: ActorRef)
-  case class StoppedReading(writer: ActorRef)
+  final case class StopReading(writer: ActorRef)
+  final case class StoppedReading(writer: ActorRef)
 
-  case class Handle(handle: AkkaProtocolHandle) extends NoSerializationVerificationNeeded
+  final case class Handle(handle: AkkaProtocolHandle) extends NoSerializationVerificationNeeded
 
-  case class OutboundAck(ack: Ack)
+  final case class OutboundAck(ack: Ack)
 
   sealed trait State
   case object Initializing extends State
@@ -653,7 +659,7 @@ private[remote] class EndpointWriter(
       // Shutdown old reader
       handle foreach { _.disassociate() }
       handle = Some(newHandle)
-      sender ! TookOver(self, newHandle)
+      sender() ! TookOver(self, newHandle)
       goto(Handoff)
     case Event(FlushAndStop, _) ⇒
       stopReason = AssociationHandle.Shutdown
@@ -809,7 +815,7 @@ private[remote] class EndpointReader(
     case StopReading(writer) ⇒
       saveState()
       context.become(notReading)
-      sender ! StoppedReading(writer)
+      sender() ! StoppedReading(writer)
 
   }
 
@@ -817,7 +823,7 @@ private[remote] class EndpointReader(
     case Disassociated(info) ⇒ handleDisassociated(info)
 
     case StopReading(writer) ⇒
-      sender ! StoppedReading(writer)
+      sender() ! StoppedReading(writer)
 
     case InboundPayload(p) ⇒
       val (ackOption, _) = tryDecodeMessageAndAck(p)

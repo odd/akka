@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -12,7 +12,7 @@ import akka.japi.Procedure
 import java.io.{ ObjectOutputStream, NotSerializableException }
 import scala.annotation.{ switch, tailrec }
 import scala.collection.immutable
-import scala.concurrent.ExecutionContext
+import scala.concurrent.ExecutionContextExecutor
 import scala.concurrent.duration.Duration
 import scala.concurrent.forkjoin.ThreadLocalRandom
 import scala.util.control.NonFatal
@@ -72,26 +72,32 @@ trait ActorContext extends ActorRefFactory {
 
   /**
    * Changes the Actor's behavior to become the new 'Receive' (PartialFunction[Any, Unit]) handler.
+   * Replaces the current behavior on the top of the behavior stack.
+   */
+  def become(behavior: Actor.Receive): Unit = become(behavior, true)
+
+  /**
+   * Changes the Actor's behavior to become the new 'Receive' (PartialFunction[Any, Unit]) handler.
    * This method acts upon the behavior stack as follows:
    *
    *  - if `discardOld = true` it will replace the top element (i.e. the current behavior)
    *  - if `discardOld = false` it will keep the current behavior and push the given one atop
    *
-   * The default of replacing the current behavior has been chosen to avoid memory leaks in
-   * case client code is written without consulting this documentation first (i.e. always pushing
-   * new closures and never issuing an `unbecome()`)
+   * The default of replacing the current behavior on the stack has been chosen to avoid memory
+   * leaks in case client code is written without consulting this documentation first (i.e.
+   * always pushing new behaviors and never issuing an `unbecome()`)
    */
-  def become(behavior: Actor.Receive, discardOld: Boolean = true): Unit
+  def become(behavior: Actor.Receive, discardOld: Boolean): Unit
 
   /**
-   * Reverts the Actor behavior to the previous one in the hotswap stack.
+   * Reverts the Actor behavior to the previous one on the behavior stack.
    */
   def unbecome(): Unit
 
   /**
    * Returns the sender 'ActorRef' of the current message.
    */
-  def sender: ActorRef
+  def sender(): ActorRef
 
   /**
    * Returns all supervised children; this method returns a view (i.e. a lazy
@@ -113,13 +119,13 @@ trait ActorContext extends ActorRefFactory {
 
   /**
    * Returns the dispatcher (MessageDispatcher) that is used for this Actor.
-   * Importing this member will place a implicit ExecutionContext in scope.
+   * Importing this member will place an implicit ExecutionContext in scope.
    */
-  implicit def dispatcher: ExecutionContext
+  implicit def dispatcher: ExecutionContextExecutor
 
   /**
    * The system that the actor belongs to.
-   * Importing this member will place a implicit ExecutionContext in scope.
+   * Importing this member will place an implicit ActorSystem in scope.
    */
   implicit def system: ActorSystem
 
@@ -150,6 +156,25 @@ trait ActorContext extends ActorRefFactory {
 }
 
 /**
+ * AbstractActorContext is the AbstractActor equivalent of ActorContext,
+ * containing the Java API
+ */
+trait AbstractActorContext extends ActorContext {
+
+  /**
+   * Returns an unmodifiable Java Collection containing the linked actors,
+   * please note that the backing map is thread-safe but not immutable
+   */
+  def getChildren(): java.lang.Iterable[ActorRef]
+
+  /**
+   * Returns a reference to the named child or null if no child with
+   * that name exists.
+   */
+  def getChild(name: String): ActorRef
+}
+
+/**
  * UntypedActorContext is the UntypedActor equivalent of ActorContext,
  * containing the Java API
  */
@@ -169,7 +194,7 @@ trait UntypedActorContext extends ActorContext {
 
   /**
    * Changes the Actor's behavior to become the new 'Procedure' handler.
-   * Replaces the current behavior at the top of the hotswap stack.
+   * Replaces the current behavior on the top of the behavior stack.
    */
   def become(behavior: Procedure[Any]): Unit
 
@@ -180,9 +205,9 @@ trait UntypedActorContext extends ActorContext {
    *  - if `discardOld = true` it will replace the top element (i.e. the current behavior)
    *  - if `discardOld = false` it will keep the current behavior and push the given one atop
    *
-   * The default of replacing the current behavior has been chosen to avoid memory leaks in
-   * case client code is written without consulting this documentation first (i.e. always pushing
-   * new closures and never issuing an `unbecome()`)
+   * The default of replacing the current behavior on the stack has been chosen to avoid memory
+   * leaks in case client code is written without consulting this documentation first (i.e.
+   * always pushing new behaviors and never issuing an `unbecome()`)
    */
   def become(behavior: Procedure[Any], discardOld: Boolean): Unit
 
@@ -310,7 +335,7 @@ private[akka] object ActorCell {
 
   final val emptyActorRefSet: Set[ActorRef] = immutable.HashSet.empty
 
-  final val terminatedProps: Props = Props(() ⇒ throw new IllegalActorStateException("This Actor has been terminated"))
+  final val terminatedProps: Props = Props((throw new IllegalActorStateException("This Actor has been terminated")): Actor)
 
   final val undefinedUid = 0
 
@@ -344,10 +369,10 @@ private[akka] object ActorCell {
 private[akka] class ActorCell(
   val system: ActorSystemImpl,
   val self: InternalActorRef,
-  val props: Props,
+  final val props: Props, // Must be final so that it can be properly cleared in clearActorCellFields
   val dispatcher: MessageDispatcher,
   val parent: InternalActorRef)
-  extends UntypedActorContext with Cell
+  extends UntypedActorContext with AbstractActorContext with Cell
   with dungeon.ReceiveTimeout
   with dungeon.Children
   with dungeon.Dispatch
@@ -478,15 +503,15 @@ private[akka] class ActorCell(
       case Kill                       ⇒ throw new ActorKilledException("Kill")
       case PoisonPill                 ⇒ self.stop()
       case sel: ActorSelectionMessage ⇒ receiveSelection(sel)
-      case Identify(messageId)        ⇒ sender ! ActorIdentity(messageId, Some(self))
+      case Identify(messageId)        ⇒ sender() ! ActorIdentity(messageId, Some(self))
     }
   }
 
   private def receiveSelection(sel: ActorSelectionMessage): Unit =
     if (sel.elements.isEmpty)
-      invoke(Envelope(sel.msg, sender, system))
+      invoke(Envelope(sel.msg, sender(), system))
     else
-      ActorSelection.deliverSelection(self, sender, sel)
+      ActorSelection.deliverSelection(self, sender(), sel)
 
   final def receiveMessage(msg: Any): Unit = actor.aroundReceive(behaviorStack.head, msg)
 
@@ -494,7 +519,7 @@ private[akka] class ActorCell(
    * ACTOR CONTEXT IMPLEMENTATION
    */
 
-  final def sender: ActorRef = currentMessage match {
+  final def sender(): ActorRef = currentMessage match {
     case null                      ⇒ system.deadLetters
     case msg if msg.sender ne null ⇒ msg.sender
     case _                         ⇒ system.deadLetters
@@ -565,7 +590,7 @@ private[akka] class ActorCell(
         e match {
           case i: InstantiationException ⇒ throw ActorInitializationException(self,
             """exception during creation, this problem is likely to occur because the class of the Actor you tried to create is either,
-               a non-static inner class (in which case make it a static inner class or use Props(new ...) or Props( new UntypedActorFactory ... )
+               a non-static inner class (in which case make it a static inner class or use Props(new ...) or Props( new Creator ... )
                or is missing an appropriate, reachable no-args constructor.
               """, i.getCause)
           case x ⇒ throw ActorInitializationException(self, "exception during creation", x)
@@ -591,21 +616,27 @@ private[akka] class ActorCell(
   }
 
   @tailrec private final def lookupAndSetField(clazz: Class[_], instance: AnyRef, name: String, value: Any): Boolean = {
-    if (try {
-      val field = clazz.getDeclaredField(name)
-      field.setAccessible(true)
-      field.set(instance, value)
-      true
-    } catch {
-      case e: NoSuchFieldException ⇒ false
-    }) true
-    else if (clazz.getSuperclass eq null) false
-    else lookupAndSetField(clazz.getSuperclass, instance, name, value)
+    @tailrec def clearFirst(fields: Array[java.lang.reflect.Field], idx: Int): Boolean =
+      if (idx < fields.length) {
+        val field = fields(idx)
+        if (field.getName == name) {
+          field.setAccessible(true)
+          field.set(instance, value)
+          true
+        } else clearFirst(fields, idx + 1)
+      } else false
+
+    clearFirst(clazz.getDeclaredFields, 0) || {
+      clazz.getSuperclass match {
+        case null ⇒ false // clazz == classOf[AnyRef]
+        case sc   ⇒ lookupAndSetField(sc, instance, name, value)
+      }
+    }
   }
 
   final protected def clearActorCellFields(cell: ActorCell): Unit = {
     cell.unstashAll()
-    if (!lookupAndSetField(cell.getClass, cell, "props", ActorCell.terminatedProps))
+    if (!lookupAndSetField(classOf[ActorCell], cell, "props", ActorCell.terminatedProps))
       throw new IllegalArgumentException("ActorCell has no props field")
   }
 

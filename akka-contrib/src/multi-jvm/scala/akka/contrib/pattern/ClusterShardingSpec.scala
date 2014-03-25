@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.contrib.pattern
 
@@ -67,11 +67,11 @@ object ClusterShardingSpec extends MultiNodeConfig {
   //#counter-actor
   case object Increment
   case object Decrement
-  case class Get(counterId: Long)
-  case class EntryEnvelope(id: Long, payload: Any)
+  final case class Get(counterId: Long)
+  final case class EntryEnvelope(id: Long, payload: Any)
 
   case object Stop
-  case class CounterChanged(delta: Int)
+  final case class CounterChanged(delta: Int)
 
   class Counter extends EventsourcedProcessor {
     import ShardRegion.Passivate
@@ -91,14 +91,14 @@ object ClusterShardingSpec extends MultiNodeConfig {
     def updateState(event: CounterChanged): Unit =
       count += event.delta
 
-    override def receiveReplay: Receive = {
+    override def receiveRecover: Receive = {
       case evt: CounterChanged ⇒ updateState(evt)
     }
 
     override def receiveCommand: Receive = {
       case Increment      ⇒ persist(CounterChanged(+1))(updateState)
       case Decrement      ⇒ persist(CounterChanged(-1))(updateState)
-      case Get(_)         ⇒ sender ! count
+      case Get(_)         ⇒ sender() ! count
       case ReceiveTimeout ⇒ context.parent ! Passivate(stopMessage = Stop)
       case Stop           ⇒ context.stop(self)
     }
@@ -112,8 +112,8 @@ object ClusterShardingSpec extends MultiNodeConfig {
   }
 
   val shardResolver: ShardRegion.ShardResolver = msg ⇒ msg match {
-    case EntryEnvelope(id, _) ⇒ (id % 10).toString
-    case Get(id)              ⇒ (id % 10).toString
+    case EntryEnvelope(id, _) ⇒ (id % 12).toString
+    case Get(id)              ⇒ (id % 12).toString
   }
   //#counter-extractor
 
@@ -222,6 +222,13 @@ class ClusterShardingSpec extends MultiNodeSpec(ClusterShardingSpec) with STMult
         region ! EntryEnvelope(2, Decrement)
         region ! Get(2)
         expectMsg(2)
+
+        region ! EntryEnvelope(11, Increment)
+        region ! EntryEnvelope(12, Increment)
+        region ! Get(11)
+        expectMsg(1)
+        region ! Get(12)
+        expectMsg(1)
       }
       enterBarrier("second-update")
       runOn(first) {
@@ -229,6 +236,14 @@ class ClusterShardingSpec extends MultiNodeSpec(ClusterShardingSpec) with STMult
         region ! Get(2)
         expectMsg(3)
         lastSender.path should be(node(second) / "user" / "counterRegion" / "2")
+
+        region ! Get(11)
+        expectMsg(1)
+        // local on first
+        lastSender.path should be(region.path / "11")
+        region ! Get(12)
+        expectMsg(1)
+        lastSender.path should be(node(second) / "user" / "counterRegion" / "12")
       }
       enterBarrier("first-update")
 
@@ -267,12 +282,20 @@ class ClusterShardingSpec extends MultiNodeSpec(ClusterShardingSpec) with STMult
       enterBarrier("crash-second")
 
       runOn(first) {
-        val probe = TestProbe()
+        val probe1 = TestProbe()
         awaitAssert {
           within(1.second) {
-            region.tell(Get(2), probe.ref)
-            probe.expectMsg(4)
-            probe.lastSender.path should be(region.path / "2")
+            region.tell(Get(2), probe1.ref)
+            probe1.expectMsg(4)
+            probe1.lastSender.path should be(region.path / "2")
+          }
+        }
+        val probe2 = TestProbe()
+        awaitAssert {
+          within(1.second) {
+            region.tell(Get(12), probe2.ref)
+            probe2.expectMsg(1)
+            probe2.lastSender.path should be(region.path / "12")
           }
         }
       }
@@ -359,7 +382,7 @@ class ClusterShardingSpec extends MultiNodeSpec(ClusterShardingSpec) with STMult
       enterBarrier("after-7")
     }
 
-    "rebalance to nodes with less shards" in within(30 seconds) {
+    "rebalance to nodes with less shards" in within(60 seconds) {
 
       runOn(fourth) {
         // third, fourth and fifth are still alive

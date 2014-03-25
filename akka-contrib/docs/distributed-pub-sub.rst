@@ -29,7 +29,7 @@ any other node. There is three modes of message delivery.
 
 The message will be delivered to one recipient with a matching path, if any such
 exists in the registry. If several entries match the path the message will be sent
-via the supplied ``RoutingLogic`` (default random) to one destination. The sender of the
+via the supplied ``RoutingLogic`` (default random) to one destination. The sender() of the
 message can specify that local affinity is preferred, i.e. the message is sent to an actor
 in the same local actor system as the used mediator actor, if any such exists, otherwise
 route to any other matching entry. A typical usage of this mode is private chat to one
@@ -107,6 +107,9 @@ A simple actor that publishes to this "content" topic:
 It can publish messages to the topic from anywhere in the cluster:
 
 .. includecode:: @contribSrc@/src/multi-jvm/scala/akka/contrib/pattern/DistributedPubSubMediatorSpec.scala#publish-message
+
+A more comprehensive sample is available in the `Typesafe Activator <http://www.typesafe.com/platform/getstarted>`_
+tutorial named `Akka Clustered PubSub with Scala! <http://www.typesafe.com/activator/template/akka-clustering>`_.
 
 DistributedPubSubExtension
 --------------------------

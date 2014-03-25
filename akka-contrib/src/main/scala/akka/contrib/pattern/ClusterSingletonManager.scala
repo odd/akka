@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.contrib.pattern
@@ -105,8 +105,8 @@ object ClusterSingletonManager {
      */
     case object TakeOverFromMe
 
-    case class HandOverRetry(count: Int)
-    case class TakeOverRetry(count: Int)
+    final case class HandOverRetry(count: Int)
+    final case class TakeOverRetry(count: Int)
     case object Cleanup
     case object StartOldestChangedBuffer
 
@@ -120,12 +120,12 @@ object ClusterSingletonManager {
     case object End extends State
 
     case object Uninitialized extends Data
-    case class YoungerData(oldestOption: Option[Address]) extends Data
-    case class BecomingOldestData(previousOldestOption: Option[Address]) extends Data
-    case class OldestData(singleton: ActorRef, singletonTerminated: Boolean = false) extends Data
-    case class WasOldestData(singleton: ActorRef, singletonTerminated: Boolean,
-                             newOldestOption: Option[Address]) extends Data
-    case class HandingOverData(singleton: ActorRef, handOverTo: Option[ActorRef]) extends Data
+    final case class YoungerData(oldestOption: Option[Address]) extends Data
+    final case class BecomingOldestData(previousOldestOption: Option[Address]) extends Data
+    final case class OldestData(singleton: ActorRef, singletonTerminated: Boolean = false) extends Data
+    final case class WasOldestData(singleton: ActorRef, singletonTerminated: Boolean,
+                                   newOldestOption: Option[Address]) extends Data
+    final case class HandingOverData(singleton: ActorRef, handOverTo: Option[ActorRef]) extends Data
     case object EndData extends Data
 
     val HandOverRetryTimer = "hand-over-retry"
@@ -145,9 +145,9 @@ object ClusterSingletonManager {
       /**
        * The first event, corresponding to CurrentClusterState.
        */
-      case class InitialOldestState(oldest: Option[Address], memberCount: Int)
+      final case class InitialOldestState(oldest: Option[Address], memberCount: Int)
 
-      case class OldestChanged(oldest: Option[Address])
+      final case class OldestChanged(oldest: Option[Address])
     }
 
     /**
@@ -389,8 +389,7 @@ class ClusterSingletonManager(
     require(!cluster.isTerminated, "Cluster node must not be terminated")
 
     // subscribe to cluster changes, re-subscribe when restart
-    cluster.subscribe(self, classOf[MemberExited])
-    cluster.subscribe(self, classOf[MemberRemoved])
+    cluster.subscribe(self, classOf[MemberExited], classOf[MemberRemoved])
 
     setTimer(CleanupTimer, Cleanup, 1.minute, repeat = true)
 
@@ -467,16 +466,16 @@ class ClusterSingletonManager(
 
     case Event(HandOverInProgress, _) ⇒
       // confirmation that the hand-over process has started
-      logInfo("Hand-over in progress at [{}]", sender.path.address)
+      logInfo("Hand-over in progress at [{}]", sender().path.address)
       cancelTimer(HandOverRetryTimer)
       stay
 
     case Event(HandOverDone, BecomingOldestData(Some(previousOldest))) ⇒
-      if (sender.path.address == previousOldest)
+      if (sender().path.address == previousOldest)
         gotoOldest()
       else {
         logInfo("Ignoring HandOverDone in BecomingOldest from [{}]. Expected previous oldest [{}]",
-          sender.path.address, previousOldest)
+          sender().path.address, previousOldest)
         stay
       }
 
@@ -486,13 +485,13 @@ class ClusterSingletonManager(
       stay
 
     case Event(TakeOverFromMe, BecomingOldestData(None)) ⇒
-      sender ! HandOverToMe
-      stay using BecomingOldestData(Some(sender.path.address))
+      sender() ! HandOverToMe
+      stay using BecomingOldestData(Some(sender().path.address))
 
     case Event(TakeOverFromMe, BecomingOldestData(Some(previousOldest))) ⇒
-      if (previousOldest == sender.path.address) sender ! HandOverToMe
+      if (previousOldest == sender().path.address) sender() ! HandOverToMe
       else logInfo("Ignoring TakeOver request in BecomingOldest from [{}]. Expected previous oldest [{}]",
-        sender.path.address, previousOldest)
+        sender().path.address, previousOldest)
       stay
 
     case Event(HandOverRetry(count), BecomingOldestData(previousOldestOption)) ⇒
@@ -540,7 +539,7 @@ class ClusterSingletonManager(
       }
 
     case Event(HandOverToMe, OldestData(singleton, singletonTerminated)) ⇒
-      gotoHandingOver(singleton, singletonTerminated, Some(sender))
+      gotoHandingOver(singleton, singletonTerminated, Some(sender()))
 
     case Event(Terminated(ref), d @ OldestData(singleton, _)) if ref == singleton ⇒
       stay using d.copy(singletonTerminated = true)
@@ -557,7 +556,7 @@ class ClusterSingletonManager(
         throw new ClusterSingletonManagerIsStuck(s"Expected hand-over to [${newOldestOption}] never occured")
 
     case Event(HandOverToMe, WasOldestData(singleton, singletonTerminated, _)) ⇒
-      gotoHandingOver(singleton, singletonTerminated, Some(sender))
+      gotoHandingOver(singleton, singletonTerminated, Some(sender()))
 
     case Event(MemberRemoved(m, _), WasOldestData(singleton, singletonTerminated, Some(newOldest))) if !selfExited && m.address == newOldest ⇒
       addRemoved(m.address)
@@ -582,9 +581,9 @@ class ClusterSingletonManager(
     case (Event(Terminated(ref), HandingOverData(singleton, handOverTo))) if ref == singleton ⇒
       handOverDone(handOverTo)
 
-    case Event(HandOverToMe, d @ HandingOverData(singleton, handOverTo)) if handOverTo == Some(sender) ⇒
+    case Event(HandOverToMe, d @ HandingOverData(singleton, handOverTo)) if handOverTo == Some(sender()) ⇒
       // retry
-      sender ! HandOverInProgress
+      sender() ! HandOverInProgress
       stay
 
   }
@@ -618,7 +617,7 @@ class ClusterSingletonManager(
       addRemoved(m.address)
       stay
     case Event(TakeOverFromMe, _) ⇒
-      logInfo("Ignoring TakeOver request in [{}] from [{}].", stateName, sender.path.address)
+      logInfo("Ignoring TakeOver request in [{}] from [{}].", stateName, sender().path.address)
       stay
     case Event(Cleanup, _) ⇒
       cleanupOverdueNotMemberAnyMore()

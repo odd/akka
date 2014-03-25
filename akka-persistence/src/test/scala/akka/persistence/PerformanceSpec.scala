@@ -19,7 +19,7 @@ object PerformanceSpec {
 
   case object StartMeasure
   case object StopMeasure
-  case class FailAt(sequenceNr: Long)
+  final case class FailAt(sequenceNr: Long)
 
   trait Measure extends { this: Actor ⇒
     val NanoToSecond = 1000.0 * 1000 * 1000
@@ -85,7 +85,7 @@ object PerformanceSpec {
   }
 
   class EventsourcedTestProcessor(name: String) extends PerformanceTestProcessor(name) with EventsourcedProcessor {
-    val receiveReplay: Receive = {
+    val receiveRecover: Receive = {
       case _ ⇒ if (lastSequenceNr % 1000 == 0) print("r")
     }
 
@@ -98,7 +98,7 @@ object PerformanceSpec {
   }
 
   class StashingEventsourcedTestProcessor(name: String) extends PerformanceTestProcessor(name) with EventsourcedProcessor {
-    val receiveReplay: Receive = {
+    val receiveRecover: Receive = {
       case _ ⇒ if (lastSequenceNr % 1000 == 0) print("r")
     }
 
@@ -166,14 +166,20 @@ class PerformanceSpec extends AkkaSpec(PersistenceSpec.config("leveldb", "Perfor
   def stressPersistentChannel(): Unit = {
     val channel = system.actorOf(PersistentChannel.props())
     val destination = system.actorOf(Props[PerformanceTestDestination])
-    1 to warmupCycles foreach { i ⇒ channel ! Deliver(Persistent(s"msg${i}"), destination) }
-    channel ! Deliver(Persistent(StartMeasure), destination)
-    1 to loadCycles foreach { i ⇒ channel ! Deliver(Persistent(s"msg${i}"), destination) }
-    channel ! Deliver(Persistent(StopMeasure), destination)
+    1 to warmupCycles foreach { i ⇒ channel ! Deliver(PersistentRepr(s"msg${i}", processorId = "test"), destination.path) }
+    channel ! Deliver(Persistent(StartMeasure), destination.path)
+    1 to loadCycles foreach { i ⇒ channel ! Deliver(PersistentRepr(s"msg${i}", processorId = "test"), destination.path) }
+    channel ! Deliver(Persistent(StopMeasure), destination.path)
     expectMsgPF(100 seconds) {
-      case throughput: Double ⇒ println(f"\nthroughput = $throughput%.2f persistent commands per second")
+      case throughput: Double ⇒ println(f"\nthroughput = $throughput%.2f persistent messages per second")
     }
   }
+
+  def subscribeToConfirmation(probe: TestProbe): Unit =
+    system.eventStream.subscribe(probe.ref, classOf[DeliveredByPersistentChannel])
+
+  def awaitConfirmation(probe: TestProbe): Unit =
+    probe.expectMsgType[DeliveredByPersistentChannel]
 
   "A command sourced processor" should {
     "have some reasonable throughput" in {
@@ -198,7 +204,14 @@ class PerformanceSpec extends AkkaSpec(PersistenceSpec.config("leveldb", "Perfor
 
   "A persistent channel" should {
     "have some reasonable throughput" in {
+      val probe = TestProbe()
+      subscribeToConfirmation(probe)
+
       stressPersistentChannel()
+
+      probe.fishForMessage(100.seconds) {
+        case DeliveredByPersistentChannel(_, snr, _, _) ⇒ snr == warmupCycles + loadCycles + 2
+      }
     }
   }
 }

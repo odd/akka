@@ -41,9 +41,9 @@ class AkkaOrderReceiver extends Actor with OrderReceiver with ActorLogging {
         m forward order
       case None ⇒
         log.warning("Unknown orderbook: " + order.orderbookSymbol)
-        sender ! Rsp(order, false)
+        sender() ! Rsp(order, false)
     }
   }
 }
 
-case class MatchingEngineRouting[ME](mapping: Map[ME, List[String]])
+final case class MatchingEngineRouting[ME](mapping: Map[ME, List[String]])

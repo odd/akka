@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.camel
@@ -77,7 +77,7 @@ trait ProducerSupport extends Actor with CamelSupport {
     case msg ⇒
       producerChild match {
         case Some(child) ⇒ child forward transformOutgoingMessage(msg)
-        case None        ⇒ messages :+= ((sender, msg))
+        case None        ⇒ messages :+= ((sender(), msg))
       }
   }
 
@@ -103,7 +103,7 @@ trait ProducerSupport extends Actor with CamelSupport {
    * actor).
    */
 
-  protected def routeResponse(msg: Any): Unit = if (!oneway) sender ! transformResponse(msg)
+  protected def routeResponse(msg: Any): Unit = if (!oneway) sender() ! transformResponse(msg)
 
   private class ProducerChild(endpoint: Endpoint, processor: SendProcessor) extends Actor {
     def receive = {
@@ -129,7 +129,7 @@ trait ProducerSupport extends Actor with CamelSupport {
       // Need copies of sender reference here since the callback could be done
       // later by another thread.
       val producer = self
-      val originalSender = sender
+      val originalSender = sender()
       val xchg = new CamelExchangeAdapter(endpoint.createExchange(pattern))
       val cmsg = CamelMessage.canonicalize(msg)
       xchg.setRequest(cmsg)
@@ -158,12 +158,12 @@ trait Producer extends ProducerSupport { this: Actor ⇒
 /**
  * INTERNAL API
  */
-private case class MessageResult(message: CamelMessage) extends NoSerializationVerificationNeeded
+private final case class MessageResult(message: CamelMessage) extends NoSerializationVerificationNeeded
 
 /**
  * INTERNAL API
  */
-private case class FailureResult(cause: Throwable, headers: Map[String, Any] = Map.empty) extends NoSerializationVerificationNeeded
+private final case class FailureResult(cause: Throwable, headers: Map[String, Any] = Map.empty) extends NoSerializationVerificationNeeded
 
 /**
  * A one-way producer.

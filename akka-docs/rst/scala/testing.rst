@@ -1,8 +1,8 @@
 .. _akka-testkit:
 
-##############################
+#####################
 Testing Actor Systems
-##############################
+#####################
 
 .. toctree::
 
@@ -130,7 +130,7 @@ The Way In-Between: Expecting Exceptions
 If you want to test the actor behavior, including hotswapping, but without
 involving a dispatcher and without having the :class:`TestActorRef` swallow
 any thrown exceptions, then there is another mode available for you: just use
-the :meth:`receive` method :class:`TestActorRef`, which will be forwarded to the
+the :meth:`receive` method on :class:`TestActorRef`, which will be forwarded to the
 underlying actor:
 
 .. includecode:: code/docs/testkit/TestkitDocSpec.scala#test-expecting-exceptions
@@ -771,4 +771,10 @@ Some `Specs2 <http://specs2.org>`_ users have contributed examples of how to wor
 
 * Specifications are by default executed concurrently, which requires some care
   when writing the tests or alternatively the ``sequential`` keyword.
+
+Configuration
+=============
+
+There are several configuration properties for the TestKit module, please refer
+to the :ref:`reference configuration <config-akka-testkit>`.
 

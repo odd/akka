@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.cluster
@@ -77,8 +77,7 @@ private[cluster] class ClusterMetricsCollector(publisher: ActorRef) extends Acto
     MetricsInterval, self, MetricsTick)
 
   override def preStart(): Unit = {
-    cluster.subscribe(self, classOf[MemberEvent])
-    cluster.subscribe(self, classOf[ReachabilityEvent])
+    cluster.subscribe(self, classOf[MemberEvent], classOf[ReachabilityEvent])
     logInfo("Metrics collection has started successfully")
   }
 
@@ -185,7 +184,7 @@ private[cluster] object MetricsGossip {
  * @param nodes metrics per node
  */
 @SerialVersionUID(1L)
-private[cluster] case class MetricsGossip(nodes: Set[NodeMetrics]) {
+private[cluster] final case class MetricsGossip(nodes: Set[NodeMetrics]) {
 
   /**
    * Removes nodes if their correlating node ring members are not [[akka.cluster.MemberStatus.Up]]
@@ -225,7 +224,7 @@ private[cluster] case class MetricsGossip(nodes: Set[NodeMetrics]) {
  * Envelope adding a sender address to the gossip.
  */
 @SerialVersionUID(1L)
-private[cluster] case class MetricsGossipEnvelope(from: Address, gossip: MetricsGossip, reply: Boolean)
+private[cluster] final case class MetricsGossipEnvelope(from: Address, gossip: MetricsGossip, reply: Boolean)
   extends ClusterMessage
 
 private[cluster] object EWMA {
@@ -273,7 +272,7 @@ private[cluster] object EWMA {
  *
  */
 @SerialVersionUID(1L)
-private[cluster] case class EWMA(value: Double, alpha: Double) {
+private[cluster] final case class EWMA(value: Double, alpha: Double) {
 
   require(0.0 <= alpha && alpha <= 1.0, "alpha must be between 0.0 and 1.0")
 
@@ -303,7 +302,7 @@ private[cluster] case class EWMA(value: Double, alpha: Double) {
  *   averages (e.g. system load average) or finite (e.g. as number of processors), are not trended.
  */
 @SerialVersionUID(1L)
-case class Metric private[cluster] (name: String, value: Number, private[cluster] val average: Option[EWMA])
+final case class Metric private[cluster] (name: String, value: Number, private[cluster] val average: Option[EWMA])
   extends MetricNumericConverter {
 
   require(defined(value), s"Invalid Metric [$name] value [$value]")
@@ -386,7 +385,7 @@ object Metric extends MetricNumericConverter {
  * @param metrics the set of sampled [[akka.actor.Metric]]
  */
 @SerialVersionUID(1L)
-case class NodeMetrics(address: Address, timestamp: Long, metrics: Set[Metric] = Set.empty[Metric]) {
+final case class NodeMetrics(address: Address, timestamp: Long, metrics: Set[Metric] = Set.empty[Metric]) {
 
   /**
    * Returns the most recent data.
@@ -482,7 +481,7 @@ object StandardMetrics {
    *   Can be undefined on some OS.
    */
   @SerialVersionUID(1L)
-  case class HeapMemory(address: Address, timestamp: Long, used: Long, committed: Long, max: Option[Long]) {
+  final case class HeapMemory(address: Address, timestamp: Long, used: Long, committed: Long, max: Option[Long]) {
     require(committed > 0L, "committed heap expected to be > 0 bytes")
     require(max.isEmpty || max.get > 0L, "max heap expected to be > 0 bytes")
   }
@@ -526,7 +525,7 @@ object StandardMetrics {
    * @param processors the number of available processors
    */
   @SerialVersionUID(1L)
-  case class Cpu(
+  final case class Cpu(
     address: Address,
     timestamp: Long,
     systemLoadAverage: Option[Double],

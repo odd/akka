@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.testkit
 
@@ -42,22 +42,22 @@ object TestActorRefSpec {
 
     def receiveT = {
       case "complexRequest" ⇒ {
-        replyTo = sender
+        replyTo = sender()
         val worker = TestActorRef(Props[WorkerActor])
         worker ! "work"
       }
       case "complexRequest2" ⇒
         val worker = TestActorRef(Props[WorkerActor])
-        worker ! sender
+        worker ! sender()
       case "workDone"      ⇒ replyTo ! "complexReply"
-      case "simpleRequest" ⇒ sender ! "simpleReply"
+      case "simpleRequest" ⇒ sender() ! "simpleReply"
     }
   }
 
   class WorkerActor() extends TActor {
     def receiveT = {
       case "work" ⇒
-        sender ! "workDone"
+        sender() ! "workDone"
         context stop self
       case replyTo: Promise[_] ⇒ replyTo.asInstanceOf[Promise[Any]].success("complexReply")
       case replyTo: ActorRef   ⇒ replyTo ! "complexReply"
@@ -100,7 +100,7 @@ object TestActorRefSpec {
    * Forwarding `Terminated` to non-watching testActor is not possible,
    * and therefore the `Terminated` message is wrapped.
    */
-  case class WrappedTerminated(t: Terminated)
+  final case class WrappedTerminated(t: Terminated)
 
 }
 
@@ -120,7 +120,7 @@ class TestActorRefSpec extends AkkaSpec("disp1.type=Dispatcher") with BeforeAndA
       "used with TestActorRef" in {
         val a = TestActorRef(Props(new Actor {
           val nested = TestActorRef(Props(new Actor { def receive = { case _ ⇒ } }))
-          def receive = { case _ ⇒ sender ! nested }
+          def receive = { case _ ⇒ sender() ! nested }
         }))
         a should not be (null)
         val nested = Await.result((a ? "any").mapTo[ActorRef], timeout.duration)
@@ -131,7 +131,7 @@ class TestActorRefSpec extends AkkaSpec("disp1.type=Dispatcher") with BeforeAndA
       "used with ActorRef" in {
         val a = TestActorRef(Props(new Actor {
           val nested = context.actorOf(Props(new Actor { def receive = { case _ ⇒ } }))
-          def receive = { case _ ⇒ sender ! nested }
+          def receive = { case _ ⇒ sender() ! nested }
         }))
         a should not be (null)
         val nested = Await.result((a ? "any").mapTo[ActorRef], timeout.duration)
@@ -141,7 +141,7 @@ class TestActorRefSpec extends AkkaSpec("disp1.type=Dispatcher") with BeforeAndA
 
     }
 
-    "support reply via sender" in {
+    "support reply via sender()" in {
       val serverRef = TestActorRef(Props[ReplyActor])
       val clientRef = TestActorRef(Props(classOf[SenderActor], serverRef))
 
@@ -214,7 +214,7 @@ class TestActorRefSpec extends AkkaSpec("disp1.type=Dispatcher") with BeforeAndA
       val f = a ? "work"
       // CallingThreadDispatcher means that there is no delay
       f should be('completed)
-      Await.result(f, timeout.duration) should equal("workDone")
+      Await.result(f, timeout.duration) should be("workDone")
     }
 
     "support receive timeout" in {
@@ -235,7 +235,7 @@ class TestActorRefSpec extends AkkaSpec("disp1.type=Dispatcher") with BeforeAndA
       })
       ref ! "hallo"
       val actor = ref.underlyingActor
-      actor.s should equal("hallo")
+      actor.s should be("hallo")
     }
 
     "set receiveTimeout to None" in {
@@ -253,13 +253,13 @@ class TestActorRefSpec extends AkkaSpec("disp1.type=Dispatcher") with BeforeAndA
       a.underlying.dispatcher.getClass should be(classOf[Dispatcher])
     }
 
-    "proxy receive for the underlying actor without sender" in {
+    "proxy receive for the underlying actor without sender()" in {
       val ref = TestActorRef[WorkerActor]
       ref.receive("work")
       ref.isTerminated should be(true)
     }
 
-    "proxy receive for the underlying actor with sender" in {
+    "proxy receive for the underlying actor with sender()" in {
       val ref = TestActorRef[WorkerActor]
       ref.receive("work", testActor)
       ref.isTerminated should be(true)

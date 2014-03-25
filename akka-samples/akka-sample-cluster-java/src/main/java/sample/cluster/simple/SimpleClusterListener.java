@@ -2,8 +2,8 @@ package sample.cluster.simple;
 
 import akka.actor.UntypedActor;
 import akka.cluster.Cluster;
-import akka.cluster.ClusterEvent.ClusterDomainEvent;
-import akka.cluster.ClusterEvent.CurrentClusterState;
+import akka.cluster.ClusterEvent;
+import akka.cluster.ClusterEvent.MemberEvent;
 import akka.cluster.ClusterEvent.MemberUp;
 import akka.cluster.ClusterEvent.MemberRemoved;
 import akka.cluster.ClusterEvent.UnreachableMember;
@@ -14,10 +14,13 @@ public class SimpleClusterListener extends UntypedActor {
   LoggingAdapter log = Logging.getLogger(getContext().system(), this);
   Cluster cluster = Cluster.get(getContext().system());
 
-  //subscribe to cluster changes, MemberUp
+  //subscribe to cluster changes
   @Override
   public void preStart() {
-    cluster.subscribe(getSelf(), ClusterDomainEvent.class);
+    //#subscribe
+    cluster.subscribe(getSelf(), ClusterEvent.initialStateAsEvents(), 
+        MemberEvent.class, UnreachableMember.class);
+    //#subscribe
   }
 
   //re-subscribe when restart
@@ -28,11 +31,7 @@ public class SimpleClusterListener extends UntypedActor {
 
   @Override
   public void onReceive(Object message) {
-    if (message instanceof CurrentClusterState) {
-      CurrentClusterState state = (CurrentClusterState) message;
-      log.info("Current members: {}", state.members());
-
-    } else if (message instanceof MemberUp) {
+    if (message instanceof MemberUp) {
       MemberUp mUp = (MemberUp) message;
       log.info("Member is Up: {}", mUp.member());
 
@@ -44,7 +43,7 @@ public class SimpleClusterListener extends UntypedActor {
       MemberRemoved mRemoved = (MemberRemoved) message;
       log.info("Member is Removed: {}", mRemoved.member());
 
-    } else if (message instanceof ClusterDomainEvent) {
+    } else if (message instanceof MemberEvent) {
       // ignore
 
     } else {

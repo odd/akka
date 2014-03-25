@@ -1,11 +1,19 @@
 .. _remoting-scala:
 
-#################
+##########
  Remoting
-#################
+##########
 
 
 For an introduction of remoting capabilities of Akka please see :ref:`remoting`.
+
+.. note::
+
+  As explained in that chapter Akka remoting is designed for communication in a
+  peer-to-peer fashion and it has limitations for client-server setups. In
+  particular Akka Remoting does not work with Network Address Translation and
+  Load Balancers, among others.
+
 
 Preparing your ActorSystem for Remoting
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -156,6 +164,29 @@ you can advise the system to create a child on that remote node like so:
 
 .. includecode:: code/docs/remoting/RemoteDeploymentDocSpec.scala#deploy
 
+Lifecycle and Failure Recovery Model
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. image:: ../images/association_lifecycle.png
+   :align: center
+   :width: 620
+
+Each link with  link with a remote system can be in one of the four states as illustrated above. Before any communication
+happens with a remote system at a given ``Address`` the state of the association is ``Idle``. The first time a message
+is attempted to be sent to the remote system or an inbound connection is accepted the state of the link transitions to
+``Active`` denoting that the two systems has messages to send or receive and no failures were encountered so far.
+When a communication failure happens and the connection is lost between the two systems the link becomes ``Gated``.
+
+In this state the system will not attempt to connect to the remote host and all outbound messages will be dropped. The time
+while the link is in the ``Gated`` state is controlled by the setting ``akka.remote.retry-gate-closed-for``:
+after this time elapses the link state transitions to ``Idle`` again. ``Gate`` is one-sided in the
+sense that whenever a successful *inbound* connection is accepted from a remote system during ``Gate`` it automatically
+transitions to ``Active`` and communication resumes immediately.
+
+In the face of communication failures that are unrecoverable because the state of the participating systems are inconsistent,
+the remote system becomes ``Quarantined``. Unlike ``Gate``, quarantining is permanent and lasts until one of the systems
+is restarted. After a restart communication can be resumed again and the link can become ``Active`` again.
+
 Watching Remote Actors
 ^^^^^^^^^^^^^^^^^^^^^^
 
@@ -234,32 +265,29 @@ Routers with Remote Destinations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 It is absolutely feasible to combine remoting with :ref:`routing-scala`.
-This is also done via configuration::
 
-  akka {
-    actor {
-      deployment {
-        /serviceA/aggregation {
-          router = "round-robin-pool"
-          nr-of-instances = 10
-          target {
-            nodes = ["akka.tcp://app@10.0.0.2:2552", "akka.tcp://app@10.0.0.3:2552"]
-          }
-        }
-      }
-    }
-  }
+A pool of remote deployed routees can be configured as:
 
-This configuration setting will clone the actor “aggregation” 10 times and deploy it evenly distributed across
-the two given target nodes.
+.. includecode:: ../scala/code/docs/routing/RouterDocSpec.scala#config-remote-round-robin-pool
+
+This configuration setting will clone the actor defined in the ``Props`` of the ``remotePool`` 10
+times and deploy it evenly distributed across the two given target nodes.
+
+A group of remote actors can be configured as:
+
+.. includecode:: ../scala/code/docs/routing/RouterDocSpec.scala#config-remote-round-robin-group
+
+This configuration setting will send messages to the defined remote actor paths.
+It requires that you create the destination actors on the remote nodes with matching paths.
+That is not done by the router. 
 
 .. _remote-sample-scala:
 
 Remoting Sample
 ^^^^^^^^^^^^^^^
 
-There is a more extensive remote example that comes with `Typesafe Activator <http://typesafe.com/platform/getstarted>`_.
-The tutorial named `Akka Remote Samples with Scala <http://typesafe.com/activator/template/akka-sample-remote-scala>`_
+There is a more extensive remote example that comes with `Typesafe Activator <http://www.typesafe.com/platform/getstarted>`_.
+The tutorial named `Akka Remote Samples with Scala <http://www.typesafe.com/activator/template/akka-sample-remote-scala>`_
 demonstrates both remote deployment and look-up of remote actors.
 
 Pluggable transport support
@@ -464,11 +492,8 @@ and related resources for troubleshooting.
 Remote Configuration
 ^^^^^^^^^^^^^^^^^^^^
 
-There are lots of configuration properties that are related to remoting in Akka. We refer to the following
-reference file for more information:
-
-.. literalinclude:: ../../../akka-remote/src/main/resources/reference.conf
-   :language: none
+There are lots of configuration properties that are related to remoting in Akka. We refer to the 
+:ref:`reference configuration <config-akka-remote>` for more information.
 
 .. note::
 

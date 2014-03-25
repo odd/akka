@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.osgi
 
@@ -41,7 +41,7 @@ class PingPongActorSystemActivatorTest extends WordSpec with Matchers with PojoS
     "start and register the ActorSystem when bundle starts" in {
       filterErrors() {
         val system = serviceForType[ActorSystem]
-        val actor = system.actorFor("/user/pong")
+        val actor = system.actorSelection("/user/pong")
 
         implicit val timeout = Timeout(5 seconds)
         Await.result(actor ? Ping, timeout.duration) should be(Pong)
@@ -73,7 +73,7 @@ class RuntimeNameActorSystemActivatorTest extends WordSpec with Matchers with Po
 
     "register an ActorSystem and add the bundle id to the system name" in {
       filterErrors() {
-        serviceForType[ActorSystem].name should equal(TestActivators.ACTOR_SYSTEM_NAME_PATTERN.format(bundleForName(TEST_BUNDLE_NAME).getBundleId))
+        serviceForType[ActorSystem].name should be(TestActivators.ACTOR_SYSTEM_NAME_PATTERN.format(bundleForName(TEST_BUNDLE_NAME).getBundleId))
       }
     }
   }

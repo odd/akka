@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package docs.routing
 
@@ -58,12 +58,12 @@ akka.actor.deployment {
 
   class Storage extends Actor {
     def receive = {
-      case x => sender ! x
+      case x => sender() ! x
     }
   }
 
   //#unit-test-logic
-  case class TestRoutee(n: Int) extends Routee {
+  final case class TestRoutee(n: Int) extends Routee {
     override def send(message: Any, sender: ActorRef): Unit = ()
   }
 
@@ -77,7 +77,7 @@ import akka.routing.Router
 import akka.japi.Util.immutableSeq
 import com.typesafe.config.Config
 
-case class RedundancyGroup(override val paths: immutable.Iterable[String], nbrCopies: Int) extends Group {
+final case class RedundancyGroup(override val paths: immutable.Iterable[String], nbrCopies: Int) extends Group {
 
   def this(config: Config) = this(
     paths = immutableSeq(config.getStringList("routees.paths")),

@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.cluster
 
@@ -236,7 +236,7 @@ abstract class ClusterDeathWatchSpec
 
         enterBarrier("first-unavailable")
 
-        val timeout = remaining
+        val timeout = remainingOrDefault
         try system.awaitTermination(timeout) catch {
           case _: TimeoutException ⇒
             fail("Failed to stop [%s] within [%s] \n%s".format(system.name, timeout,

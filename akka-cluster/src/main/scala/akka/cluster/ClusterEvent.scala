@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.cluster
 
@@ -20,6 +20,31 @@ import akka.dispatch.{ UnboundedMessageQueueSemantics, RequiresMessageQueue }
  * }}}
  */
 object ClusterEvent {
+
+  sealed abstract class SubscriptionInitialStateMode
+  /**
+   * When using this subscription mode a snapshot of
+   * [[akka.cluster.ClusterEvent.CurrentClusterState]] will be sent to the
+   * subscriber as the first message.
+   */
+  case object InitialStateAsSnapshot extends SubscriptionInitialStateMode
+  /**
+   * When using this subscription mode the events corresponding
+   * to the current state will be sent to the subscriber to mimic what you would
+   * have seen if you were listening to the events when they occurred in the past.
+   */
+  case object InitialStateAsEvents extends SubscriptionInitialStateMode
+
+  /**
+   * Java API
+   */
+  def initialStateAsSnapshot = InitialStateAsSnapshot
+
+  /**
+   * Java API
+   */
+  def initialStateAsEvents = InitialStateAsEvents
+
   /**
    * Marker interface for cluster domain events.
    */
@@ -28,12 +53,12 @@ object ClusterEvent {
   /**
    * Current snapshot state of the cluster. Sent to new subscriber.
    */
-  case class CurrentClusterState(
+  final case class CurrentClusterState(
     members: immutable.SortedSet[Member] = immutable.SortedSet.empty,
     unreachable: Set[Member] = Set.empty,
     seenBy: Set[Address] = Set.empty,
     leader: Option[Address] = None,
-    roleLeaderMap: Map[String, Option[Address]] = Map.empty) extends ClusterDomainEvent {
+    roleLeaderMap: Map[String, Option[Address]] = Map.empty) {
 
     /**
      * Java API: get current member list.
@@ -97,14 +122,15 @@ object ClusterEvent {
   /**
    * Member status changed to Up.
    */
-  case class MemberUp(member: Member) extends MemberEvent {
+  final case class MemberUp(member: Member) extends MemberEvent {
     if (member.status != Up) throw new IllegalArgumentException("Expected Up status, got: " + member)
   }
 
   /**
-   * Member status changed to Exiting.
+   * Member status changed to [[MemberStatus.Exiting]] and will be removed
+   * when all members have seen the `Exiting` status.
    */
-  case class MemberExited(member: Member) extends MemberEvent {
+  final case class MemberExited(member: Member) extends MemberEvent {
     if (member.status != Exiting) throw new IllegalArgumentException("Expected Exiting status, got: " + member)
   }
 
@@ -115,7 +141,7 @@ object ClusterEvent {
    * When `previousStatus` is `MemberStatus.Exiting` the node was removed
    * after graceful leaving and exiting.
    */
-  case class MemberRemoved(member: Member, previousStatus: MemberStatus) extends MemberEvent {
+  final case class MemberRemoved(member: Member, previousStatus: MemberStatus) extends MemberEvent {
     if (member.status != Removed) throw new IllegalArgumentException("Expected Removed status, got: " + member)
   }
 
@@ -123,7 +149,7 @@ object ClusterEvent {
    * Leader of the cluster members changed. Published when the state change
    * is first seen on a node.
    */
-  case class LeaderChanged(leader: Option[Address]) extends ClusterDomainEvent {
+  final case class LeaderChanged(leader: Option[Address]) extends ClusterDomainEvent {
     /**
      * Java API
      * @return address of current leader, or null if none
@@ -135,7 +161,7 @@ object ClusterEvent {
    * First member (leader) of the members within a role set changed.
    * Published when the state change is first seen on a node.
    */
-  case class RoleLeaderChanged(role: String, leader: Option[Address]) extends ClusterDomainEvent {
+  final case class RoleLeaderChanged(role: String, leader: Option[Address]) extends ClusterDomainEvent {
     /**
      * Java API
      * @return address of current leader, or null if none
@@ -152,19 +178,19 @@ object ClusterEvent {
   /**
    * A member is considered as unreachable by the failure detector.
    */
-  case class UnreachableMember(member: Member) extends ReachabilityEvent
+  final case class UnreachableMember(member: Member) extends ReachabilityEvent
 
   /**
    * A member is considered as reachable by the failure detector
    * after having been unreachable.
    * @see [[UnreachableMember]]
    */
-  case class ReachableMember(member: Member) extends ReachabilityEvent
+  final case class ReachableMember(member: Member) extends ReachabilityEvent
 
   /**
    * Current snapshot of cluster node metrics. Published to subscribers.
    */
-  case class ClusterMetricsChanged(nodeMetrics: Set[NodeMetrics]) extends ClusterDomainEvent {
+  final case class ClusterMetricsChanged(nodeMetrics: Set[NodeMetrics]) extends ClusterDomainEvent {
     /**
      * Java API
      */
@@ -176,17 +202,17 @@ object ClusterEvent {
    * INTERNAL API
    * The nodes that have seen current version of the Gossip.
    */
-  private[cluster] case class SeenChanged(convergence: Boolean, seenBy: Set[Address]) extends ClusterDomainEvent
+  private[cluster] final case class SeenChanged(convergence: Boolean, seenBy: Set[Address]) extends ClusterDomainEvent
 
   /**
    * INTERNAL API
    */
-  private[cluster] case class ReachabilityChanged(reachability: Reachability) extends ClusterDomainEvent
+  private[cluster] final case class ReachabilityChanged(reachability: Reachability) extends ClusterDomainEvent
 
   /**
    * INTERNAL API
    */
-  private[cluster] case class CurrentInternalStats(
+  private[cluster] final case class CurrentInternalStats(
     gossipStats: GossipStats,
     vclockStats: VectorClockStats) extends ClusterDomainEvent
 
@@ -302,36 +328,43 @@ private[cluster] final class ClusterDomainEventPublisher extends Actor with Acto
   }
 
   def receive = {
-    case PublishChanges(newGossip)            ⇒ publishChanges(newGossip)
-    case currentStats: CurrentInternalStats   ⇒ publishInternalStats(currentStats)
-    case PublishCurrentClusterState(receiver) ⇒ publishCurrentClusterState(receiver)
-    case Subscribe(subscriber, to)            ⇒ subscribe(subscriber, to)
-    case Unsubscribe(subscriber, to)          ⇒ unsubscribe(subscriber, to)
-    case PublishEvent(event)                  ⇒ publish(event)
+    case PublishChanges(newGossip)           ⇒ publishChanges(newGossip)
+    case currentStats: CurrentInternalStats  ⇒ publishInternalStats(currentStats)
+    case SendCurrentClusterState(receiver)   ⇒ sendCurrentClusterState(receiver)
+    case Subscribe(subscriber, initMode, to) ⇒ subscribe(subscriber, initMode, to)
+    case Unsubscribe(subscriber, to)         ⇒ unsubscribe(subscriber, to)
+    case PublishEvent(event)                 ⇒ publish(event)
   }
 
   def eventStream: EventStream = context.system.eventStream
 
   /**
    * The current snapshot state corresponding to latest gossip
-   * to mimic what you would have seen if you where listening to the events.
+   * to mimic what you would have seen if you were listening to the events.
    */
-  def publishCurrentClusterState(receiver: Option[ActorRef]): Unit = {
+  def sendCurrentClusterState(receiver: ActorRef): Unit = {
     val state = CurrentClusterState(
       members = latestGossip.members,
       unreachable = latestGossip.overview.reachability.allUnreachableOrTerminated map latestGossip.member,
       seenBy = latestGossip.seenBy.map(_.address),
       leader = latestGossip.leader.map(_.address),
       roleLeaderMap = latestGossip.allRoles.map(r ⇒ r -> latestGossip.roleLeader(r).map(_.address))(collection.breakOut))
-    receiver match {
-      case Some(ref) ⇒ ref ! state
-      case None      ⇒ publish(state)
-    }
+    receiver ! state
   }
 
-  def subscribe(subscriber: ActorRef, to: Class[_]): Unit = {
-    publishCurrentClusterState(Some(subscriber))
-    eventStream.subscribe(subscriber, to)
+  def subscribe(subscriber: ActorRef, initMode: SubscriptionInitialStateMode, to: Set[Class[_]]): Unit = {
+    initMode match {
+      case InitialStateAsEvents ⇒
+        def pub(event: AnyRef): Unit = {
+          if (to.exists(_.isAssignableFrom(event.getClass)))
+            subscriber ! event
+        }
+        publishDiff(Gossip.empty, latestGossip, pub)
+      case InitialStateAsSnapshot ⇒
+        sendCurrentClusterState(subscriber)
+    }
+
+    to foreach { eventStream.subscribe(subscriber, _) }
   }
 
   def unsubscribe(subscriber: ActorRef, to: Option[Class[_]]): Unit = to match {
@@ -343,25 +376,23 @@ private[cluster] final class ClusterDomainEventPublisher extends Actor with Acto
     val oldGossip = latestGossip
     // keep the latestGossip to be sent to new subscribers
     latestGossip = newGossip
-    diffUnreachable(oldGossip, newGossip) foreach publish
-    diffReachable(oldGossip, newGossip) foreach publish
-    diffMemberEvents(oldGossip, newGossip) foreach publish
-    diffLeader(oldGossip, newGossip) foreach publish
-    diffRolesLeader(oldGossip, newGossip) foreach publish
+    publishDiff(oldGossip, newGossip, publish)
+  }
+
+  def publishDiff(oldGossip: Gossip, newGossip: Gossip, pub: AnyRef ⇒ Unit): Unit = {
+    diffMemberEvents(oldGossip, newGossip) foreach pub
+    diffUnreachable(oldGossip, newGossip) foreach pub
+    diffReachable(oldGossip, newGossip) foreach pub
+    diffLeader(oldGossip, newGossip) foreach pub
+    diffRolesLeader(oldGossip, newGossip) foreach pub
     // publish internal SeenState for testing purposes
-    diffSeen(oldGossip, newGossip) foreach publish
-    diffReachability(oldGossip, newGossip) foreach publish
+    diffSeen(oldGossip, newGossip) foreach pub
+    diffReachability(oldGossip, newGossip) foreach pub
   }
 
   def publishInternalStats(currentStats: CurrentInternalStats): Unit = publish(currentStats)
 
   def publish(event: AnyRef): Unit = eventStream publish event
-
-  def publishStart(): Unit =
-    if (latestGossip ne Gossip.empty) {
-      clearState()
-      publishCurrentClusterState(None)
-    }
 
   def clearState(): Unit = {
     latestGossip = Gossip.empty

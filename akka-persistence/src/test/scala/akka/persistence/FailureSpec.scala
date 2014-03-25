@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.persistence
@@ -21,8 +21,10 @@ object FailureSpec {
       akka.persistence.destination.chaos.confirm-failure-rate = 0.3
       akka.persistence.journal.plugin = "akka.persistence.journal.chaos"
       akka.persistence.journal.chaos.write-failure-rate = 0.3
+      akka.persistence.journal.chaos.confirm-failure-rate = 0.2
       akka.persistence.journal.chaos.delete-failure-rate = 0.3
-      akka.persistence.journal.chaos.replay-failure-rate = 0.3
+      akka.persistence.journal.chaos.replay-failure-rate = 0.25
+      akka.persistence.journal.chaos.read-highest-failure-rate = 0.1
       akka.persistence.journal.chaos.class = akka.persistence.journal.chaos.ChaosJournal
       akka.persistence.snapshot-store.local.dir = "target/snapshots-failure-spec/"
     """)
@@ -30,10 +32,10 @@ object FailureSpec {
   val numMessages = 10
 
   case object Start
-  case class Done(ints: Vector[Int])
+  final case class Done(ints: Vector[Int])
 
-  case class ProcessingFailure(i: Int)
-  case class JournalingFailure(i: Int)
+  final case class ProcessingFailure(i: Int)
+  final case class JournalingFailure(i: Int)
 
   trait ChaosSupport { this: Actor ⇒
     def random = ThreadLocalRandom.current
@@ -70,7 +72,7 @@ object FailureSpec {
           throw new TestException(debugMessage(s"rejected payload ${i}"))
         } else {
           add(i)
-          channel forward Deliver(p, destination)
+          channel forward Deliver(p, destination.path)
           log.debug(debugMessage(s"processed payload ${i}"))
         }
       case PersistenceFailure(i: Int, _, _) ⇒

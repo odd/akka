@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.cluster
@@ -30,7 +30,7 @@ object ClusterSpec {
     # akka.loglevel = DEBUG
     """
 
-  case class GossipTo(address: Address)
+  final case class GossipTo(address: Address)
 }
 
 @org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
@@ -68,14 +68,19 @@ class ClusterSpec extends AkkaSpec(ClusterSpec.config) with ImplicitSender {
       awaitAssert(clusterView.status should be(MemberStatus.Up))
     }
 
-    "publish CurrentClusterState to subscribers when requested" in {
+    "publish inital state as snapshot to subscribers" in {
       try {
-        cluster.subscribe(testActor, classOf[ClusterEvent.ClusterDomainEvent])
-        // first, is in response to the subscription
+        cluster.subscribe(testActor, ClusterEvent.InitialStateAsSnapshot, classOf[ClusterEvent.MemberEvent])
         expectMsgClass(classOf[ClusterEvent.CurrentClusterState])
+      } finally {
+        cluster.unsubscribe(testActor)
+      }
+    }
 
-        cluster.publishCurrentClusterState()
-        expectMsgClass(classOf[ClusterEvent.CurrentClusterState])
+    "publish inital state as events to subscribers" in {
+      try {
+        cluster.subscribe(testActor, ClusterEvent.InitialStateAsEvents, classOf[ClusterEvent.MemberEvent])
+        expectMsgClass(classOf[ClusterEvent.MemberUp])
       } finally {
         cluster.unsubscribe(testActor)
       }

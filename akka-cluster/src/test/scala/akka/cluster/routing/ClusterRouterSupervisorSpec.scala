@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.cluster.routing
 
@@ -44,24 +44,6 @@ class ClusterRouterSupervisorSpec extends AkkaSpec("""
           allowLocalRoutees = true,
           useRole = None)).
           props(Props(classOf[KillableActor], testActor)), name = "therouter")
-
-      router ! "go away"
-      expectMsg("supervised")
-    }
-
-    "use provided supervisor strategy of deprecated router" in {
-      val router = system.actorOf(
-        ClusterRouterPool(RoundRobinPool(nrOfInstances = 1, supervisorStrategy =
-          OneForOneStrategy(loggingEnabled = false) {
-            case _ ⇒
-              testActor ! "supervised"
-              SupervisorStrategy.Stop
-          }), ClusterRouterPoolSettings(
-          totalInstances = 1,
-          maxInstancesPerNode = 1,
-          allowLocalRoutees = true,
-          useRole = None)).
-          props(Props(classOf[KillableActor], testActor)), name = "theoldrouter")
 
       router ! "go away"
       expectMsg("supervised")

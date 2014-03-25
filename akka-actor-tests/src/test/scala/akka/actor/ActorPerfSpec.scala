@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.actor
 
@@ -13,22 +13,22 @@ import scala.util.Try
 
 object ActorPerfSpec {
 
-  case class Create(number: Int, props: () ⇒ Props)
+  final case class Create(number: Int, props: () ⇒ Props)
   case object Created
   case object IsAlive
   case object Alive
-  case class WaitForChildren(number: Int)
+  final case class WaitForChildren(number: Int)
   case object Waited
 
   class EmptyActor extends Actor {
     def receive = {
-      case IsAlive ⇒ sender ! Alive
+      case IsAlive ⇒ sender() ! Alive
     }
   }
 
   class EmptyArgsActor(val foo: Int, val bar: Int) extends Actor {
     def receive = {
-      case IsAlive ⇒ sender ! Alive
+      case IsAlive ⇒ sender() ! Alive
     }
   }
 
@@ -36,15 +36,15 @@ object ActorPerfSpec {
 
     def receive = {
       case IsAlive ⇒
-        sender ! Alive
+        sender() ! Alive
       case Create(number, propsCreator) ⇒
         for (i ← 1 to number) {
           context.actorOf(propsCreator.apply())
         }
-        sender ! Created
+        sender() ! Created
       case WaitForChildren(number) ⇒
         context.children.foreach(_ ! IsAlive)
-        context.become(waiting(number, sender), false)
+        context.become(waiting(number, sender()), false)
     }
 
     def waiting(number: Int, replyTo: ActorRef): Receive = {

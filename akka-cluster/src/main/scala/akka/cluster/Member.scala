@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.cluster
@@ -219,7 +219,7 @@ object MemberStatus {
  * INTERNAL API
  */
 @SerialVersionUID(1L)
-private[cluster] case class UniqueAddress(address: Address, uid: Int) extends Ordered[UniqueAddress] {
+private[cluster] final case class UniqueAddress(address: Address, uid: Int) extends Ordered[UniqueAddress] {
   override def hashCode = uid
 
   def compare(that: UniqueAddress): Int = {

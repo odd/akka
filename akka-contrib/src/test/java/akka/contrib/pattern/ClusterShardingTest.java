@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.contrib.pattern;
@@ -124,7 +124,7 @@ public class ClusterShardingTest {
     }
 
     @Override
-    public void onReceiveReplay(Object msg) {
+    public void onReceiveRecover(Object msg) {
       if (msg instanceof CounterChanged)
         updateState((CounterChanged) msg);
       else

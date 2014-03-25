@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote
 
@@ -45,8 +45,8 @@ object RemoteWatcherSpec {
   }
 
   object TestRemoteWatcher {
-    case class AddressTerm(address: Address)
-    case class Quarantined(address: Address, uid: Int)
+    final case class AddressTerm(address: Address)
+    final case class Quarantined(address: Address, uid: Option[Int])
   }
 
   class TestRemoteWatcher(heartbeatExpectedResponseAfter: FiniteDuration) extends RemoteWatcher(createFailureDetector,
@@ -61,7 +61,7 @@ object RemoteWatcherSpec {
       // that doesn't interfere with the real watch that is going on in the background
       context.system.eventStream.publish(TestRemoteWatcher.AddressTerm(address))
 
-    override def quarantine(address: Address, uid: Int): Unit = {
+    override def quarantine(address: Address, uid: Option[Int]): Unit = {
       // don't quarantine in remoting, but publish a testable message
       context.system.eventStream.publish(TestRemoteWatcher.Quarantined(address, uid))
     }
@@ -74,6 +74,7 @@ object RemoteWatcherSpec {
 class RemoteWatcherSpec extends AkkaSpec(
   """akka {
        loglevel = INFO
+       log-dead-letters-during-shutdown = false
        actor.provider = "akka.remote.RemoteActorRefProvider"
        remote.netty.tcp {
          hostname = localhost
@@ -199,7 +200,7 @@ class RemoteWatcherSpec extends AkkaSpec(
           // but no HeartbeatRsp
           monitorA ! ReapUnreachableTick
           p.expectMsg(1 second, TestRemoteWatcher.AddressTerm(b.path.address))
-          q.expectMsg(1 second, TestRemoteWatcher.Quarantined(b.path.address, remoteAddressUid))
+          q.expectMsg(1 second, TestRemoteWatcher.Quarantined(b.path.address, Some(remoteAddressUid)))
         }
       }
 
@@ -234,8 +235,8 @@ class RemoteWatcherSpec extends AkkaSpec(
           // but no HeartbeatRsp
           monitorA ! ReapUnreachableTick
           p.expectMsg(1 second, TestRemoteWatcher.AddressTerm(b.path.address))
-          // no quarantine when missing first heartbeat, uid unknown
-          q.expectNoMsg(1 second)
+          // no real quarantine when missing first heartbeat, uid unknown
+          q.expectMsg(1 second, TestRemoteWatcher.Quarantined(b.path.address, None))
         }
       }
 
@@ -272,7 +273,7 @@ class RemoteWatcherSpec extends AkkaSpec(
           // but no HeartbeatRsp
           monitorA ! ReapUnreachableTick
           p.expectMsg(1 second, TestRemoteWatcher.AddressTerm(b.path.address))
-          q.expectMsg(1 second, TestRemoteWatcher.Quarantined(b.path.address, remoteAddressUid))
+          q.expectMsg(1 second, TestRemoteWatcher.Quarantined(b.path.address, Some(remoteAddressUid)))
         }
       }
 
@@ -317,7 +318,7 @@ class RemoteWatcherSpec extends AkkaSpec(
           // but no HeartbeatRsp
           monitorA ! ReapUnreachableTick
           p.expectMsg(1 second, TestRemoteWatcher.AddressTerm(c.path.address))
-          q.expectMsg(1 second, TestRemoteWatcher.Quarantined(c.path.address, remoteAddressUid))
+          q.expectMsg(1 second, TestRemoteWatcher.Quarantined(c.path.address, Some(remoteAddressUid)))
         }
       }
 

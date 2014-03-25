@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.cluster
 
@@ -23,7 +23,7 @@ private[cluster] object Reachability {
   }
 
   @SerialVersionUID(1L)
-  case class Record(observer: UniqueAddress, subject: UniqueAddress, status: ReachabilityStatus, version: Long)
+  final case class Record(observer: UniqueAddress, subject: UniqueAddress, status: ReachabilityStatus, version: Long)
 
   sealed trait ReachabilityStatus
   @SerialVersionUID(1L) case object Reachable extends ReachabilityStatus

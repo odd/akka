@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.routing
 
@@ -47,7 +47,7 @@ object RoutingSpec {
 
   class Echo extends Actor {
     def receive = {
-      case _ ⇒ sender ! self
+      case _ ⇒ sender() ! self
     }
   }
 
@@ -70,7 +70,7 @@ class RoutingSpec extends AkkaSpec(RoutingSpec.config) with DefaultTimeout with 
       watch(router)
       watch(c2)
       system.stop(c2)
-      expectTerminated(c2).existenceConfirmed should equal(true)
+      expectTerminated(c2).existenceConfirmed should be(true)
       // it might take a while until the Router has actually processed the Terminated message
       awaitCond {
         router ! ""
@@ -81,7 +81,7 @@ class RoutingSpec extends AkkaSpec(RoutingSpec.config) with DefaultTimeout with 
         res == Seq(c1, c1)
       }
       system.stop(c1)
-      expectTerminated(router).existenceConfirmed should equal(true)
+      expectTerminated(router).existenceConfirmed should be(true)
     }
 
     "not terminate when resizer is used" in {
@@ -96,7 +96,7 @@ class RoutingSpec extends AkkaSpec(RoutingSpec.config) with DefaultTimeout with 
       val router = system.actorOf(RoundRobinPool(nrOfInstances = 0, resizer = Some(resizer)).props(
         routeeProps = Props[TestActor]))
       watch(router)
-      Await.ready(latch, remaining)
+      Await.ready(latch, remainingOrDefault)
       router ! GetRoutees
       val routees = expectMsgType[Routees].routees
       routees.size should be(2)
@@ -132,7 +132,7 @@ class RoutingSpec extends AkkaSpec(RoutingSpec.config) with DefaultTimeout with 
       }
       val router = system.actorOf(RoundRobinPool(nrOfInstances = 0, resizer = Some(resizer)).props(
         routeeProps = Props[TestActor]), "router3")
-      Await.ready(latch, remaining)
+      Await.ready(latch, remainingOrDefault)
       router ! GetRoutees
       expectMsgType[Routees].routees.size should be(3)
       system.stop(router)
@@ -202,8 +202,8 @@ class RoutingSpec extends AkkaSpec(RoutingSpec.config) with DefaultTimeout with 
         def receive = {
           case "start" ⇒
             context.actorOf(RoundRobinPool(2).props(routeeProps = Props(new Actor {
-              def receive = { case x ⇒ sender ! x }
-            }))) ? "hello" pipeTo sender
+              def receive = { case x ⇒ sender() ! x }
+            }))) ? "hello" pipeTo sender()
         }
       })) ! "start"
       expectMsg("hello")
@@ -239,10 +239,10 @@ class RoutingSpec extends AkkaSpec(RoutingSpec.config) with DefaultTimeout with 
 
     "allow external configuration" in {
       val sys = ActorSystem("FromConfig", ConfigFactory
-        .parseString("akka.actor.deployment./routed.router=round-robin")
+        .parseString("akka.actor.deployment./routed.router=round-robin-pool")
         .withFallback(system.settings.config))
       try {
-        sys.actorOf(FromConfig.props(), "routed")
+        sys.actorOf(FromConfig.props(routeeProps = Props[TestActor]), "routed")
       } finally {
         shutdown(sys)
       }

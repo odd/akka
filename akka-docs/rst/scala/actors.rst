@@ -71,43 +71,37 @@ dispatcher to use, see more below). Here are some examples of how to create a
 
 .. includecode:: code/docs/actor/ActorDocSpec.scala#creating-props
 
-The last line shows how to pass constructor arguments to the :class:`Actor`
-being created. The presence of a matching constructor is verified during
-construction of the :class:`Props` object, resulting in an
+The second variant shows how to pass constructor arguments to the
+:class:`Actor` being created, but it should only be used outside of actors as
+explained below.
+
+The last line shows a possibility to pass constructor arguments regardless of
+the context it is being used in. The presence of a matching constructor is
+verified during construction of the :class:`Props` object, resulting in an
 :class:`IllegalArgumentEception` if no or multiple matching constructors are
 found.
 
-Deprecated Variants
-^^^^^^^^^^^^^^^^^^^
-
-Up to Akka 2.1 there were also the following possibilities (which are retained
-for a migration period):
+Dangerous Variants
+^^^^^^^^^^^^^^^^^^
 
 .. includecode:: code/docs/actor/ActorDocSpec.scala#creating-props-deprecated
 
-The first one is deprecated because the case class structure changed between
-Akka 2.1 and 2.2.
-
-The two variants in the middle are deprecated because :class:`Props` are
-primarily concerned with actor creation and thus the “creator” part should be
-explicitly set when creating an instance. In case you want to deploy one actor
-in the same was as another, simply use
-``Props(...).withDeploy(otherProps.deploy)``.
-
-The last one is not technically deprecated, but it is not recommended because
-it encourages to close over the enclosing scope, resulting in non-serializable
+This method is not recommended to be used within another actor because it
+encourages to close over the enclosing scope, resulting in non-serializable
 :class:`Props` and possibly race conditions (breaking the actor encapsulation).
 We will provide a macro-based solution in a future release which allows similar
 syntax without the headaches, at which point this variant will be properly
-deprecated.
+deprecated. On the other hand using this variant in a :class:`Props` factory in
+the actor’s companion object as documented under “Recommended Practices” below
+is completely fine.
 
 There were two use-cases for these methods: passing constructor arguments to
 the actor—which is solved by the newly introduced
-:meth:`Props.apply(clazz, args)` method above—and creating actors “on the spot”
-as anonymous classes. The latter should be solved by making these actors named
-inner classes instead (if they are not declared within a top-level ``object``
-then the enclosing instance’s ``this`` reference needs to be passed as the
-first argument).
+:meth:`Props.apply(clazz, args)` method above or the recommended practice
+below—and creating actors “on the spot” as anonymous classes. The latter should
+be solved by making these actors named classes instead (if they are not
+declared within a top-level ``object`` then the enclosing instance’s ``this``
+reference needs to be passed as the first argument).
 
 .. warning::
 
@@ -119,12 +113,10 @@ Recommended Practices
 
 It is a good idea to provide factory methods on the companion object of each
 :class:`Actor` which help keeping the creation of suitable :class:`Props` as
-close to the actor definition as possible, thus containing the gap in
-type-safety introduced by reflective instantiation within a single class
-instead of spreading it out across a whole code-base. This helps especially
-when refactoring the actor’s constructor signature at a later point, where
-compiler checks will allow this modification to be done with greater confidence
-than without.
+close to the actor definition as possible. This also avoids the pitfalls
+associated with using the ``Props.apply(...)`` method which takes a by-name
+argument, since within a companion object the given code block will not retain
+a reference to its enclosing scope:
 
 .. includecode:: code/docs/actor/ActorDocSpec.scala#props-factory
 
@@ -191,7 +183,7 @@ __ Props_
 Techniques for dependency injection and integration with dependency injection frameworks
 are described in more depth in the 
 `Using Akka with Dependency Injection <http://letitcrash.com/post/55958814293/akka-dependency-injection>`_ 
-guideline and the `Akka Java Spring <http://typesafe.com/activator/template/akka-java-spring>`_ tutorial
+guideline and the `Akka Java Spring <http://www.typesafe.com/activator/template/akka-java-spring>`_ tutorial
 in Typesafe Activator.
 
 The Inbox
@@ -262,6 +254,8 @@ described in the following:
 
 The implementations shown above are the defaults provided by the :class:`Actor`
 trait.
+
+.. _actor-lifecycle-scala:
 
 Actor Lifecycle
 ---------------
@@ -440,7 +434,7 @@ Messages can be sent via the :class:`ActorSelection` and the path of the
 does not match any actors the message will be dropped.
 
 To acquire an :class:`ActorRef` for an :class:`ActorSelection` you need to send
-a message to the selection and use the ``sender`` reference of the reply from
+a message to the selection and use the ``sender()`` reference of the reply from
 the actor. There is a built-in ``Identify`` message that all Actors will
 understand and automatically reply to with a ``ActorIdentity`` message
 containing the :class:`ActorRef`. This message is handled specially by the
@@ -525,8 +519,8 @@ message. This gives the best concurrency and scalability characteristics.
 
 If invoked from within an Actor, then the sending actor reference will be
 implicitly passed along with the message and available to the receiving Actor
-in its ``sender: ActorRef`` member field. The target actor can use this
-to reply to the original sender, by using ``sender ! replyMsg``.
+in its ``sender(): ActorRef`` member method. The target actor can use this
+to reply to the original sender, by using ``sender() ! replyMsg``.
 
 If invoked from an instance that is **not** an Actor the sender will be
 :obj:`deadLetters` actor reference by default.
@@ -548,7 +542,7 @@ future to affect the submission of the aggregated :class:`Result` to another
 actor.
 
 Using ``ask`` will send a message to the receiving Actor as with ``tell``, and
-the receiving actor must reply with ``sender ! reply`` in order to complete the
+the receiving actor must reply with ``sender() ! reply`` in order to complete the
 returned :class:`Future` with a value. The ``ask`` operation involves creating
 an internal actor for handling this reply, which needs to have a timeout after
 which it is destroyed in order not to leak resources; see more below.
@@ -621,8 +615,8 @@ Reply to messages
 =================
 
 If you want to have a handle for replying to a message, you can use
-``sender``, which gives you an ActorRef. You can reply by sending to
-that ActorRef with ``sender ! replyMsg``. You can also store the ActorRef
+``sender()``, which gives you an ActorRef. You can reply by sending to
+that ActorRef with ``sender() ! replyMsg``. You can also store the ActorRef
 for replying later, or passing on to other actors. If there is no sender (a
 message was sent without an actor or future context) then the sender
 defaults to a 'dead-letter' actor ref.
@@ -631,7 +625,7 @@ defaults to a 'dead-letter' actor ref.
 
   case request =>
     val result = process(request)
-    sender ! result       // will have dead-letter actor as default
+    sender() ! result       // will have dead-letter actor as default
 
 Receive timeout
 ===============
@@ -714,9 +708,16 @@ termination of several actors:
 
 .. includecode:: code/docs/actor/ActorDocSpec.scala#gracefulStop
 
+.. includecode:: code/docs/actor/ActorDocSpec.scala#gracefulStop-actor
+
 When ``gracefulStop()`` returns successfully, the actor’s ``postStop()`` hook
 will have been executed: there exists a happens-before edge between the end of
 ``postStop()`` and the return of ``gracefulStop()``.
+
+In the above example a custom ``Manager.Shutdown`` message is sent to the target
+actor to initiate the process of stopping the actor. You can use ``PoisonPill`` for
+this, but then you have limited possibilities to perform interactions with other actors
+before stopping the target actor. Simple cleanup tasks can be handled in ``postStop``.
 
 .. warning::
 
@@ -755,7 +756,7 @@ Hakkers`_). It will replace the current behavior (i.e. the top of the behavior
 stack), which means that you do not use :meth:`unbecome`, instead always the
 next behavior is explicitly installed.
 
-.. _Dining Hakkers: @github@/akka-samples/akka-sample-fsm/src/main/scala/DiningHakkersOnBecome.scala
+.. _Dining Hakkers: http://www.typesafe.com/activator/template/akka-sample-fsm-scala
 
 The other way of using :meth:`become` does not replace but add to the top of
 the behavior stack. In this case care must be taken to ensure that the number
@@ -891,15 +892,18 @@ supervisor’s decision the actor is resumed (as if nothing happened), restarted
 Extending Actors using PartialFunction chaining
 ===============================================
 
-A bit advanced but very useful way of defining a base message handler and then
-extend that, either through inheritance or delegation, is to use
-``PartialFunction.orElse`` chaining.
+Sometimes it can be useful to share common behavior among a few actors, or compose one actor's behavior from multiple smaller functions.
+This is possible because an actor's :meth:`receive` method returns an ``Actor.Receive``, which is a type alias for ``PartialFunction[Any,Unit]``,
+and partial functions can be chained together using the ``PartialFunction#orElse`` method. You can chain as many functions as you need,
+however you should keep in mind that "first match" wins - which may be important when combining functions that both can handle the same type of message.
+
+For example, imagine you have a set of actors which are either ``Producers`` or ``Consumers``, yet sometimes it makes sense to
+have an actor share both behaviors. This can be easily achieved without having to duplicate code by extracting the behaviors to
+traits and implementing the actor's :meth:`receive` as combination of these partial functions.
 
 .. includecode:: code/docs/actor/ActorDocSpec.scala#receive-orElse
 
-Or:
-
-.. includecode:: code/docs/actor/ActorDocSpec.scala#receive-orElse2
+Instead of inheritance the same pattern can be applied via composition - one would simply compose the receive method using partial functions from delegates.
 
 Initialization patterns
 =======================

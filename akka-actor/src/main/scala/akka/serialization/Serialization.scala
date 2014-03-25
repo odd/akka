@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.serialization
@@ -42,7 +42,7 @@ object Serialization {
    * Serialization information needed for serializing local actor refs.
    * INTERNAL API
    */
-  private[akka] case class Information(address: Address, system: ActorSystem)
+  private[akka] final case class Information(address: Address, system: ActorSystem)
 
   /**
    * The serialized path of an actorRef, based on the current transport serialization information.

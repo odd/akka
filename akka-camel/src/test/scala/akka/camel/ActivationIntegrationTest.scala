@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.camel
@@ -26,7 +26,7 @@ class ActivationIntegrationTest extends WordSpec with Matchers with SharedCamelS
   "ActivationAware should be notified when endpoint is activated" in {
     val latch = new TestLatch(0)
     val actor = system.actorOf(Props(new TestConsumer("direct:actor-1", latch)), "act-direct-actor-1")
-    Await.result(camel.activationFutureFor(actor), 10 seconds) should equal(actor)
+    Await.result(camel.activationFutureFor(actor), 10 seconds) should be(actor)
 
     template.requestBody("direct:actor-1", "test") should be("received test")
   }
@@ -75,7 +75,7 @@ class ActivationIntegrationTest extends WordSpec with Matchers with SharedCamelS
     }
 
     override def receive = {
-      case msg: CamelMessage ⇒ sender ! "received " + msg.body
+      case msg: CamelMessage ⇒ sender() ! "received " + msg.body
     }
   }
 

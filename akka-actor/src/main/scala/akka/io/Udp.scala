@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.io
 
@@ -14,12 +14,6 @@ import akka.actor._
 
 /**
  * UDP Extension for Akka’s IO layer.
- *
- * <b>All contents of the `akka.io` package is marked “experimental”.</b>
- *
- * This marker signifies that APIs may still change in response to user feedback
- * through-out the 2.2 release cycle. The implementation itself is considered
- * stable and ready for production use.
  *
  * This extension implements the connectionless UDP protocol without
  * calling `connect` on the underlying sockets, i.e. without restricting
@@ -83,7 +77,7 @@ object Udp extends ExtensionId[UdpExt] with ExtensionIdProvider {
    * sending using this mechanism is not suitable if replies are expected, use
    * [[Bind]] in that case.
    */
-  case class Send(payload: ByteString, target: InetSocketAddress, ack: Event) extends Command {
+  final case class Send(payload: ByteString, target: InetSocketAddress, ack: Event) extends Command {
     require(ack != null, "ack must be non-null. Use NoAck if you don't want acks.")
 
     def wantsAck: Boolean = !ack.isInstanceOf[NoAck]
@@ -98,9 +92,9 @@ object Udp extends ExtensionId[UdpExt] with ExtensionIdProvider {
    * The listener actor for the newly bound port will reply with a [[Bound]]
    * message, or the manager will reply with a [[CommandFailed]] message.
    */
-  case class Bind(handler: ActorRef,
-                  localAddress: InetSocketAddress,
-                  options: immutable.Traversable[SocketOption] = Nil) extends Command
+  final case class Bind(handler: ActorRef,
+                        localAddress: InetSocketAddress,
+                        options: immutable.Traversable[SocketOption] = Nil) extends Command
 
   /**
    * Send this message to the listener actor that previously sent a [[Bound]]
@@ -145,20 +139,20 @@ object Udp extends ExtensionId[UdpExt] with ExtensionIdProvider {
    * When a listener actor receives a datagram from its socket it will send
    * it to the handler designated in the [[Bind]] message using this message type.
    */
-  case class Received(data: ByteString, sender: InetSocketAddress) extends Event
+  final case class Received(data: ByteString, sender: InetSocketAddress) extends Event
 
   /**
    * When a command fails it will be replied to with this message type,
    * wrapping the failing command object.
    */
-  case class CommandFailed(cmd: Command) extends Event
+  final case class CommandFailed(cmd: Command) extends Event
 
   /**
    * This message is sent by the listener actor in response to a [[Bind]] command.
    * If the address to bind to specified a port number of zero, then this message
    * can be inspected to find out which port was automatically assigned.
    */
-  case class Bound(localAddress: InetSocketAddress) extends Event
+  final case class Bound(localAddress: InetSocketAddress) extends Event
 
   /**
    * The “simple sender” sends this message type in response to a [[SimpleSender]] query.
@@ -185,7 +179,7 @@ object Udp extends ExtensionId[UdpExt] with ExtensionIdProvider {
      *
      * For more information see [[java.net.DatagramSocket#setBroadcast]]
      */
-    case class Broadcast(on: Boolean) extends SocketOption {
+    final case class Broadcast(on: Boolean) extends SocketOption {
       override def beforeDatagramBind(s: DatagramSocket): Unit = s.setBroadcast(on)
     }
 
@@ -218,7 +212,7 @@ class UdpExt(system: ExtendedActorSystem) extends IO.Extension {
   val settings: UdpSettings = new UdpSettings(system.settings.config.getConfig("akka.io.udp"))
 
   val manager: ActorRef = {
-    system.asInstanceOf[ActorSystemImpl].systemActorOf(
+    system.systemActorOf(
       props = Props(classOf[UdpManager], this).withDeploy(Deploy.local),
       name = "IO-UDP-FF")
   }

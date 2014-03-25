@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.routing
 
@@ -16,7 +16,7 @@ object ScatterGatherFirstCompletedSpec {
     def receive = { case _ ⇒ }
   }
 
-  case class Stop(id: Option[Int] = None)
+  final case class Stop(id: Option[Int] = None)
 
   def newActor(id: Int, shudownLatch: Option[TestLatch] = None)(implicit system: ActorSystem) =
     system.actorOf(Props(new Actor {
@@ -26,7 +26,7 @@ object ScatterGatherFirstCompletedSpec {
         case _id: Int if (_id == id)        ⇒
         case x ⇒ {
           Thread sleep 100 * id
-          sender ! id
+          sender() ! id
         }
       }
 

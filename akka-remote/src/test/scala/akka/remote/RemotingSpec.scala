@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote
 
@@ -17,18 +17,18 @@ import scala.concurrent.forkjoin.ThreadLocalRandom
 
 object RemotingSpec {
 
-  case class ActorForReq(s: String)
-  case class ActorSelReq(s: String)
+  final case class ActorForReq(s: String)
+  final case class ActorSelReq(s: String)
 
   class Echo1 extends Actor {
     var target: ActorRef = context.system.deadLetters
 
     def receive = {
-      case (p: Props, n: String) ⇒ sender ! context.actorOf(Props[Echo1], n)
+      case (p: Props, n: String) ⇒ sender() ! context.actorOf(Props[Echo1], n)
       case ex: Exception         ⇒ throw ex
-      case ActorForReq(s)        ⇒ sender ! context.actorFor(s)
-      case ActorSelReq(s)        ⇒ sender ! context.actorSelection(s)
-      case x                     ⇒ target = sender; sender ! x
+      case ActorForReq(s)        ⇒ sender() ! context.actorFor(s)
+      case ActorSelReq(s)        ⇒ sender() ! context.actorSelection(s)
+      case x                     ⇒ target = sender(); sender() ! x
     }
 
     override def preStart() {}
@@ -43,17 +43,17 @@ object RemotingSpec {
 
   class Echo2 extends Actor {
     def receive = {
-      case "ping"                ⇒ sender ! (("pong", sender))
-      case a: ActorRef           ⇒ a ! (("ping", sender))
-      case ("ping", a: ActorRef) ⇒ sender ! (("pong", a))
-      case ("pong", a: ActorRef) ⇒ a ! (("pong", sender.path.toSerializationFormat))
+      case "ping"                ⇒ sender() ! (("pong", sender()))
+      case a: ActorRef           ⇒ a ! (("ping", sender()))
+      case ("ping", a: ActorRef) ⇒ sender() ! (("pong", a))
+      case ("pong", a: ActorRef) ⇒ a ! (("pong", sender().path.toSerializationFormat))
     }
   }
 
   class Proxy(val one: ActorRef, val another: ActorRef) extends Actor {
     def receive = {
-      case s if sender.path == one.path     ⇒ another ! s
-      case s if sender.path == another.path ⇒ one ! s
+      case s if sender().path == one.path     ⇒ another ! s
+      case s if sender().path == another.path ⇒ one ! s
     }
   }
 
@@ -153,8 +153,8 @@ class RemotingSpec extends AkkaSpec(RemotingSpec.cfg) with ImplicitSender with D
     val bigBounceId = s"bigBounce-${ThreadLocalRandom.current.nextInt()}"
     val bigBounceOther = remoteSystem.actorOf(Props(new Actor {
       def receive = {
-        case x: Int ⇒ sender ! byteStringOfSize(x)
-        case x      ⇒ sender ! x
+        case x: Int ⇒ sender() ! byteStringOfSize(x)
+        case x      ⇒ sender() ! x
       }
     }).withDeploy(Deploy.local), bigBounceId)
     val bigBounceHere = system.actorFor(s"akka.test://remote-sys@localhost:12346/user/$bigBounceId")
@@ -265,7 +265,7 @@ class RemotingSpec extends AkkaSpec(RemotingSpec.cfg) with ImplicitSender with D
 
     "create and supervise children on remote node" in {
       val r = system.actorOf(Props[Echo1], "blub")
-      r.path.toString should equal("akka.test://remote-sys@localhost:12346/remote/akka.test/RemotingSpec@localhost:12345/user/blub")
+      r.path.toString should be("akka.test://remote-sys@localhost:12346/remote/akka.test/RemotingSpec@localhost:12345/user/blub")
       r ! 42
       expectMsg(42)
       EventFilter[Exception]("crash", occurrences = 1).intercept {
@@ -311,8 +311,8 @@ class RemotingSpec extends AkkaSpec(RemotingSpec.cfg) with ImplicitSender with D
     "look-up actors across node boundaries" in {
       val l = system.actorOf(Props(new Actor {
         def receive = {
-          case (p: Props, n: String) ⇒ sender ! context.actorOf(p, n)
-          case ActorForReq(s)        ⇒ sender ! context.actorFor(s)
+          case (p: Props, n: String) ⇒ sender() ! context.actorOf(p, n)
+          case ActorForReq(s)        ⇒ sender() ! context.actorFor(s)
         }
       }), "looker1")
       // child is configured to be deployed on remote-sys (remoteSystem)
@@ -354,8 +354,8 @@ class RemotingSpec extends AkkaSpec(RemotingSpec.cfg) with ImplicitSender with D
     "select actors across node boundaries" in {
       val l = system.actorOf(Props(new Actor {
         def receive = {
-          case (p: Props, n: String) ⇒ sender ! context.actorOf(p, n)
-          case ActorSelReq(s)        ⇒ sender ! context.actorSelection(s)
+          case (p: Props, n: String) ⇒ sender() ! context.actorOf(p, n)
+          case ActorSelReq(s)        ⇒ sender() ! context.actorSelection(s)
         }
       }), "looker2")
       // child is configured to be deployed on remoteSystem
@@ -374,9 +374,9 @@ class RemotingSpec extends AkkaSpec(RemotingSpec.cfg) with ImplicitSender with D
       lastSender should be theSameInstanceAs grandchild
       mysel ! Identify(mysel)
       val grandchild2 = expectMsgType[ActorIdentity].ref
-      grandchild2 should equal(Some(grandchild))
+      grandchild2 should be(Some(grandchild))
       system.actorSelection("/user/looker2/child") ! Identify(None)
-      expectMsgType[ActorIdentity].ref should equal(Some(child))
+      expectMsgType[ActorIdentity].ref should be(Some(child))
       l ! ActorSelReq("child/..")
       expectMsgType[ActorSelection] ! Identify(None)
       expectMsgType[ActorIdentity].ref.get should be theSameInstanceAs l
@@ -416,12 +416,16 @@ class RemotingSpec extends AkkaSpec(RemotingSpec.cfg) with ImplicitSender with D
       system.actorSelection(child.path / "*" / "grandgrandchild") ! Identify("idReq13")
       expectMsg(ActorIdentity("idReq13", Some(grandgrandchild)))
 
+      val sel1 = system.actorSelection("/user/looker2/child/grandchild/grandgrandchild")
+      system.actorSelection(sel1.toSerializationFormat) ! Identify("idReq18")
+      expectMsg(ActorIdentity("idReq18", Some(grandgrandchild)))
+
       child ! Identify("idReq14")
       expectMsg(ActorIdentity("idReq14", Some(child)))
       watch(child)
       child ! PoisonPill
       expectMsg("postStop")
-      expectMsgType[Terminated].actor should equal(child)
+      expectMsgType[Terminated].actor should be(child)
       l ! ((Props[Echo1], "child"))
       val child2 = expectMsgType[ActorRef]
       child2 ! Identify("idReq15")
@@ -444,7 +448,7 @@ class RemotingSpec extends AkkaSpec(RemotingSpec.cfg) with ImplicitSender with D
     "not fail ask across node boundaries" in within(5.seconds) {
       import system.dispatcher
       val f = for (_ ← 1 to 1000) yield here ? "ping" mapTo manifest[(String, ActorRef)]
-      Await.result(Future.sequence(f), remaining).map(_._1).toSet should be(Set("pong"))
+      Await.result(Future.sequence(f), timeout.duration).map(_._1).toSet should be(Set("pong"))
     }
 
     "be able to use multiple transports and use the appropriate one (TCP)" in {

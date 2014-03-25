@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package docs.event
 
@@ -51,7 +51,7 @@ object LoggingDocSpec {
   //#mdc-actor
   import Logging.MDC
 
-  case class Req(work: String, visitorId: Int)
+  final case class Req(work: String, visitorId: Int)
 
   class MdcActorMixin extends Actor with akka.actor.DiagnosticActorLogging {
     var reqId = 0
@@ -85,7 +85,7 @@ object LoggingDocSpec {
 
   class MyEventListener extends Actor {
     def receive = {
-      case InitializeLogger(_)                        => sender ! LoggerInitialized
+      case InitializeLogger(_)                        => sender() ! LoggerInitialized
       case Error(cause, logSource, logClass, message) => // ...
       case Warning(logSource, logClass, message)      => // ...
       case Info(logSource, logClass, message)         => // ...

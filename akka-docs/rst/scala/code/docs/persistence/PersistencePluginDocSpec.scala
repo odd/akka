@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package docs.persistence
@@ -10,8 +10,9 @@ import scala.collection.immutable.Seq
 //#plugin-imports
 
 import com.typesafe.config._
-
 import org.scalatest.WordSpec
+import scala.concurrent.duration._
+import akka.testkit.TestKit
 
 import akka.actor.ActorSystem
 //#plugin-imports
@@ -23,9 +24,9 @@ import akka.persistence.snapshot._
 object PersistencePluginDocSpec {
   val config =
     """
-      //#max-batch-size
-      akka.persistence.journal.max-batch-size = 200
-      //#max-batch-size
+      //#max-message-batch-size
+      akka.persistence.journal.max-message-batch-size = 200
+      //#max-message-batch-size
       //#journal-config
       akka.persistence.journal.leveldb.dir = "target/journal"
       //#journal-config
@@ -69,8 +70,12 @@ class PersistencePluginDocSpec extends WordSpec {
         //#snapshot-store-plugin-config
       """
 
-    val system = ActorSystem("doc", ConfigFactory.parseString(providerConfig).withFallback(ConfigFactory.parseString(PersistencePluginDocSpec.config)))
-    val extension = Persistence(system)
+    val system = ActorSystem("PersistencePluginDocSpec", ConfigFactory.parseString(providerConfig).withFallback(ConfigFactory.parseString(PersistencePluginDocSpec.config)))
+    try {
+      Persistence(system)
+    } finally {
+      TestKit.shutdownActorSystem(system, 10.seconds, false)
+    }
   }
 }
 
@@ -119,10 +124,12 @@ trait SharedLeveldbPluginDocSpec {
 }
 
 class MyJournal extends AsyncWriteJournal {
-  def writeAsync(persistentBatch: Seq[PersistentRepr]): Future[Unit] = ???
-  def deleteAsync(processorId: String, fromSequenceNr: Long, toSequenceNr: Long, permanent: Boolean): Future[Unit] = ???
-  def confirmAsync(processorId: String, sequenceNr: Long, channelId: String): Future[Unit] = ???
-  def replayAsync(processorId: String, fromSequenceNr: Long, toSequenceNr: Long)(replayCallback: (PersistentRepr) => Unit): Future[Long] = ???
+  def asyncWriteMessages(messages: Seq[PersistentRepr]): Future[Unit] = ???
+  def asyncWriteConfirmations(confirmations: Seq[PersistentConfirmation]): Future[Unit] = ???
+  def asyncDeleteMessages(messageIds: Seq[PersistentId], permanent: Boolean): Future[Unit] = ???
+  def asyncDeleteMessagesTo(processorId: String, toSequenceNr: Long, permanent: Boolean): Future[Unit] = ???
+  def asyncReplayMessages(processorId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long)(replayCallback: (PersistentRepr) => Unit): Future[Unit] = ???
+  def asyncReadHighestSequenceNr(processorId: String, fromSequenceNr: Long): Future[Long] = ???
 }
 
 class MySnapshotStore extends SnapshotStore {

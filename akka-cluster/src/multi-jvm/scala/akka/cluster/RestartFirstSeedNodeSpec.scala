@@ -1,5 +1,5 @@
 /**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.cluster
 
@@ -70,7 +70,7 @@ abstract class RestartFirstSeedNodeSpec
           def receive = {
             case a: Address ⇒
               seedNode1Address = a
-              sender ! "ok"
+              sender() ! "ok"
           }
         }).withDeploy(Deploy.local), name = "address-receiver")
         enterBarrier("seed1-address-receiver-ready")
@@ -100,7 +100,7 @@ abstract class RestartFirstSeedNodeSpec
 
       // shutdown seed1System
       runOn(seed1) {
-        shutdown(seed1System, remaining)
+        shutdown(seed1System, remainingOrDefault)
       }
       runOn(seed2, seed3) {
         awaitMembersUp(2, canNotBePartOfMemberRing = Set(seedNodes.head))

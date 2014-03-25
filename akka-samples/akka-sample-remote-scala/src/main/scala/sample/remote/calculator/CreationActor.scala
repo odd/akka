@@ -1,6 +1,3 @@
-/**
- *  Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
- */
 package sample.remote.calculator
 
 import akka.actor.Actor
@@ -16,10 +13,10 @@ class CreationActor extends Actor {
     case result: MathResult => result match {
       case MultiplicationResult(n1, n2, r) =>
         printf("Mul result: %d * %d = %d\n", n1, n2, r)
-        context.stop(sender)
+        context.stop(sender())
       case DivisionResult(n1, n2, r) =>
         printf("Div result: %.0f / %d = %.2f\n", n1, n2, r)
-        context.stop(sender)
+        context.stop(sender())
     }
   }
 }

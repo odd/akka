@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.event
@@ -50,37 +50,37 @@ abstract class EventBusSpec(busName: String) extends AkkaSpec with BeforeAndAfte
     val subscriber = createNewSubscriber()
 
     "allow subscribers" in {
-      bus.subscribe(subscriber, classifier) should equal(true)
+      bus.subscribe(subscriber, classifier) should be(true)
     }
 
     "allow to unsubscribe already existing subscriber" in {
-      bus.unsubscribe(subscriber, classifier) should equal(true)
+      bus.unsubscribe(subscriber, classifier) should be(true)
     }
 
     "not allow to unsubscribe non-existing subscriber" in {
       val sub = createNewSubscriber()
-      bus.unsubscribe(sub, classifier) should equal(false)
+      bus.unsubscribe(sub, classifier) should be(false)
       disposeSubscriber(system, sub)
     }
 
     "not allow for the same subscriber to subscribe to the same channel twice" in {
-      bus.subscribe(subscriber, classifier) should equal(true)
-      bus.subscribe(subscriber, classifier) should equal(false)
-      bus.unsubscribe(subscriber, classifier) should equal(true)
+      bus.subscribe(subscriber, classifier) should be(true)
+      bus.subscribe(subscriber, classifier) should be(false)
+      bus.unsubscribe(subscriber, classifier) should be(true)
     }
 
     "not allow for the same subscriber to unsubscribe to the same channel twice" in {
-      bus.subscribe(subscriber, classifier) should equal(true)
-      bus.unsubscribe(subscriber, classifier) should equal(true)
-      bus.unsubscribe(subscriber, classifier) should equal(false)
+      bus.subscribe(subscriber, classifier) should be(true)
+      bus.unsubscribe(subscriber, classifier) should be(true)
+      bus.unsubscribe(subscriber, classifier) should be(false)
     }
 
     "allow to add multiple subscribers" in {
       val subscribers = (1 to 10) map { _ ⇒ createNewSubscriber() }
       val events = createEvents(10)
       val classifiers = events map getClassifierFor
-      subscribers.zip(classifiers) forall { case (s, c) ⇒ bus.subscribe(s, c) } should equal(true)
-      subscribers.zip(classifiers) forall { case (s, c) ⇒ bus.unsubscribe(s, c) } should equal(true)
+      subscribers.zip(classifiers) forall { case (s, c) ⇒ bus.subscribe(s, c) } should be(true)
+      subscribers.zip(classifiers) forall { case (s, c) ⇒ bus.unsubscribe(s, c) } should be(true)
 
       subscribers foreach (disposeSubscriber(system, _))
     }
@@ -112,10 +112,10 @@ abstract class EventBusSpec(busName: String) extends AkkaSpec with BeforeAndAfte
     "publish the given event to all intended subscribers" in {
       val range = 0 until 10
       val subscribers = range map (_ ⇒ createNewSubscriber())
-      subscribers foreach { s ⇒ bus.subscribe(s, classifier) should equal(true) }
+      subscribers foreach { s ⇒ bus.subscribe(s, classifier) should be(true) }
       bus.publish(event)
       range foreach { _ ⇒ expectMsg(event) }
-      subscribers foreach { s ⇒ bus.unsubscribe(s, classifier) should equal(true); disposeSubscriber(system, s) }
+      subscribers foreach { s ⇒ bus.unsubscribe(s, classifier) should be(true); disposeSubscriber(system, s) }
     }
 
     "not publish the given event to any other subscribers than the intended ones" in {
@@ -171,9 +171,12 @@ class ActorEventBusSpec extends EventBusSpec("ActorEventBus") {
 }
 
 object ScanningEventBusSpec {
-  import akka.event.japi.ScanningEventBus
 
-  class MyScanningEventBus extends ScanningEventBus[Int, akka.japi.Procedure[Int], String] {
+  class MyScanningEventBus extends EventBus with ScanningClassification {
+    type Event = Int
+    type Subscriber = Procedure[Int]
+    type Classifier = String
+
     protected def compareClassifiers(a: Classifier, b: Classifier): Int = a compareTo b
     protected def compareSubscribers(a: Subscriber, b: Subscriber): Int = akka.util.Helpers.compareIdentityHash(a, b)
 
@@ -200,11 +203,17 @@ class ScanningEventBusSpec extends EventBusSpec("ScanningEventBus") {
 }
 
 object LookupEventBusSpec {
-  class MyLookupEventBus extends akka.event.japi.LookupEventBus[Int, akka.japi.Procedure[Int], String] {
-    protected def classify(event: Event): Classifier = event.toString
-    protected def compareSubscribers(a: Subscriber, b: Subscriber): Int = akka.util.Helpers.compareIdentityHash(a, b)
-    protected def mapSize = 32
-    protected def publish(event: Event, subscriber: Subscriber): Unit = subscriber(event)
+  class MyLookupEventBus extends EventBus with LookupClassification {
+    type Event = Int
+    type Subscriber = Procedure[Int]
+    type Classifier = String
+
+    override protected def classify(event: Int): String = event.toString
+    override protected def compareSubscribers(a: Procedure[Int], b: Procedure[Int]): Int =
+      akka.util.Helpers.compareIdentityHash(a, b)
+    override protected def mapSize = 32
+    override protected def publish(event: Int, subscriber: Procedure[Int]): Unit =
+      subscriber(event)
   }
 }
 
@@ -223,3 +232,4 @@ class LookupEventBusSpec extends EventBusSpec("LookupEventBus") {
 
   def disposeSubscriber(system: ActorSystem, subscriber: BusType#Subscriber): Unit = ()
 }
+

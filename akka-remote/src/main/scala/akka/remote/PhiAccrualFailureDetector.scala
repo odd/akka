@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.remote
 
@@ -12,6 +12,7 @@ import scala.concurrent.duration.FiniteDuration
 import scala.collection.immutable
 import com.typesafe.config.Config
 import akka.event.EventStream
+import akka.util.Helpers.ConfigOps
 
 /**
  * Implementation of 'The Phi Accrual Failure Detector' by Hayashibara et al. as defined in their paper:
@@ -71,9 +72,9 @@ class PhiAccrualFailureDetector(
     this(
       threshold = config.getDouble("threshold"),
       maxSampleSize = config.getInt("max-sample-size"),
-      minStdDeviation = Duration(config.getMilliseconds("min-std-deviation"), MILLISECONDS),
-      acceptableHeartbeatPause = Duration(config.getMilliseconds("acceptable-heartbeat-pause"), MILLISECONDS),
-      firstHeartbeatEstimate = Duration(config.getMilliseconds("heartbeat-interval"), MILLISECONDS))
+      minStdDeviation = config.getMillisDuration("min-std-deviation"),
+      acceptableHeartbeatPause = config.getMillisDuration("acceptable-heartbeat-pause"),
+      firstHeartbeatEstimate = config.getMillisDuration("heartbeat-interval"))
 
   require(threshold > 0.0, "failure-detector.threshold must be > 0")
   require(maxSampleSize > 0, "failure-detector.max-sample-size must be > 0")
@@ -96,7 +97,7 @@ class PhiAccrualFailureDetector(
    * Implement using optimistic lockless concurrency, all state is represented
    * by this immutable case class and managed by an AtomicReference.
    */
-  private case class State(history: HeartbeatHistory, timestamp: Option[Long])
+  private final case class State(history: HeartbeatHistory, timestamp: Option[Long])
 
   private val state = new AtomicReference[State](State(history = firstHeartbeat, timestamp = None))
 
@@ -202,7 +203,7 @@ private[akka] object HeartbeatHistory {
  * The stats (mean, variance, stdDeviation) are not defined for
  * for empty HeartbeatHistory, i.e. throws AritmeticException.
  */
-private[akka] case class HeartbeatHistory private (
+private[akka] final case class HeartbeatHistory private (
   maxSampleSize: Int,
   intervals: immutable.IndexedSeq[Long],
   intervalSum: Long,

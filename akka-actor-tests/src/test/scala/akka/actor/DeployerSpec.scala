@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.actor
@@ -32,33 +32,33 @@ object DeployerSpec {
           mailbox = my-mailbox
         }
         /service-round-robin {
-          router = round-robin
+          router = round-robin-pool
         }
         /service-random {
-          router = random
+          router = random-pool
         }
         /service-scatter-gather {
-          router = scatter-gather
+          router = scatter-gather-pool
           within = 2 seconds
         }
         /service-consistent-hashing {
-          router = consistent-hashing
+          router = consistent-hashing-pool
         }
         /service-resizer {
-          router = round-robin
+          router = round-robin-pool
           resizer {
             lower-bound = 1
             upper-bound = 10
           }
         }
         /some/random-service {
-          router = round-robin
+          router = round-robin-pool
         }
         "/some/*" {
-          router = random
+          router = random-pool
         }
         "/*/some" {
-          router = scatter-gather
+          router = scatter-gather-pool
         }
       }
       """, ConfigParseOptions.defaults)
@@ -126,7 +126,7 @@ class DeployerSpec extends AkkaSpec(DeployerSpec.deployerConf) {
         val invalidDeployerConf = ConfigFactory.parseString("""
             akka.actor.deployment {
               /service-invalid-number-of-instances {
-                router = round-robin
+                router = round-robin-pool
                 nr-of-instances = boom
               }
             }
@@ -141,7 +141,7 @@ class DeployerSpec extends AkkaSpec(DeployerSpec.deployerConf) {
         val invalidDeployerConf = ConfigFactory.parseString("""
             akka.actor.deployment {
               /gul/ubåt {
-                router = round-robin
+                router = round-robin-pool
                 nr-of-instances = 2
               }
             }
@@ -194,6 +194,7 @@ class DeployerSpec extends AkkaSpec(DeployerSpec.deployerConf) {
       mapping("round-robin-group") should be(classOf[akka.routing.RoundRobinGroup].getName)
       mapping("random-pool") should be(classOf[akka.routing.RandomPool].getName)
       mapping("random-group") should be(classOf[akka.routing.RandomGroup].getName)
+      mapping("balancing-pool") should be(classOf[akka.routing.BalancingPool].getName)
       mapping("smallest-mailbox-pool") should be(classOf[akka.routing.SmallestMailboxPool].getName)
       mapping("broadcast-pool") should be(classOf[akka.routing.BroadcastPool].getName)
       mapping("broadcast-group") should be(classOf[akka.routing.BroadcastGroup].getName)

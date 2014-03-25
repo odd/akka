@@ -24,13 +24,6 @@ sample as it is easy to follow the log output to understand what is happening in
 
    fault-tolerance-sample
 
-.. note::
-
-  If the strategy is declared inside the supervising actor (as opposed to
-  as a static property or class) its decider has access to all internal state of
-  the actor in a thread-safe fashion, including obtaining a reference to the
-  currently failed child (available as the ``getSender()`` of the failure message).
-
 Creating a Supervisor Strategy
 ------------------------------
 
@@ -51,6 +44,7 @@ failing one). There are limits set on the restart frequency, namely maximum 10
 restarts per minute. ``-1`` and ``Duration.Inf()`` means that the respective limit
 does not apply, leaving the possibility to specify an absolute upper limit on the
 restarts or to make the restarts work infinitely.
+The child actor is stopped if the limit is exceeded.
 
 .. note::
 

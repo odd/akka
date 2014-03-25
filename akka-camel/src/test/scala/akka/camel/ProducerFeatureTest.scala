@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package akka.camel
@@ -24,14 +24,14 @@ import akka.actor.Status.Failure
 /**
  * Tests the features of the Camel Producer.
  */
-class ProducerFeatureTest extends TestKit(ActorSystem("test", AkkaSpec.testConf)) with WordSpecLike with BeforeAndAfterAll with BeforeAndAfterEach with Matchers {
+class ProducerFeatureTest extends TestKit(ActorSystem("ProducerFeatureTest", AkkaSpec.testConf)) with WordSpecLike with BeforeAndAfterAll with BeforeAndAfterEach with Matchers {
 
   import ProducerFeatureTest._
   implicit def camel = CamelExtension(system)
 
   override protected def afterAll() {
     super.afterAll()
-    shutdown(system)
+    shutdown()
   }
 
   val camelContext = camel.context
@@ -60,7 +60,7 @@ class ProducerFeatureTest extends TestKit(ActorSystem("test", AkkaSpec.testConf)
           case p: Props ⇒ {
             val producer = context.actorOf(p)
             context.watch(producer)
-            sender ! producer
+            sender() ! producer
           }
           case Terminated(actorRef) ⇒ {
             deadActor = Some(actorRef)
@@ -275,7 +275,7 @@ object ProducerFeatureTest {
         body: String ⇒
           if (body == "err") throw new Exception("Crash!")
           val upperMsg = body.toUpperCase
-          lastSender = Some(sender)
+          lastSender = Some(sender())
           lastMessage = Some(upperMsg)
       }
       else msg
@@ -314,9 +314,9 @@ object ProducerFeatureTest {
   class TestResponder extends Actor {
     def receive = {
       case msg: CamelMessage ⇒ msg.body match {
-        case "fail" ⇒ context.sender ! akka.actor.Status.Failure(new AkkaCamelException(new Exception("failure"), msg.headers))
+        case "fail" ⇒ context.sender() ! akka.actor.Status.Failure(new AkkaCamelException(new Exception("failure"), msg.headers))
         case _ ⇒
-          context.sender ! (msg.mapBody {
+          context.sender() ! (msg.mapBody {
             body: String ⇒ "received %s" format body
           })
       }
@@ -326,10 +326,10 @@ object ProducerFeatureTest {
   class ReplyingForwardTarget extends Actor {
     def receive = {
       case msg: CamelMessage ⇒
-        context.sender ! (msg.copy(headers = msg.headers + ("test" -> "result")))
+        context.sender() ! (msg.copy(headers = msg.headers + ("test" -> "result")))
       case msg: akka.actor.Status.Failure ⇒
         msg.cause match {
-          case e: AkkaCamelException ⇒ context.sender ! Status.Failure(new AkkaCamelException(e, e.headers + ("test" -> "failure")))
+          case e: AkkaCamelException ⇒ context.sender() ! Status.Failure(new AkkaCamelException(e, e.headers + ("test" -> "failure")))
         }
     }
   }
@@ -368,8 +368,8 @@ object ProducerFeatureTest {
 
   class IntermittentErrorConsumer(override val endpointUri: String) extends Consumer {
     def receive = {
-      case msg: CamelMessage if msg.bodyAs[String] == "fail" ⇒ sender ! Failure(new Exception("fail"))
-      case msg: CamelMessage                                 ⇒ sender ! msg
+      case msg: CamelMessage if msg.bodyAs[String] == "fail" ⇒ sender() ! Failure(new Exception("fail"))
+      case msg: CamelMessage                                 ⇒ sender() ! msg
     }
   }
 

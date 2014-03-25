@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 
 package docs.circuitbreaker
@@ -36,9 +36,9 @@ class DangerousActor extends Actor with ActorLogging {
 
   def receive = {
     case "is my middle name" =>
-      breaker.withCircuitBreaker(Future(dangerousCall)) pipeTo sender
+      breaker.withCircuitBreaker(Future(dangerousCall)) pipeTo sender()
     case "block for me" =>
-      sender ! breaker.withSyncCircuitBreaker(dangerousCall)
+      sender() ! breaker.withSyncCircuitBreaker(dangerousCall)
   }
   //#circuit-breaker-usage
 

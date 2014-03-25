@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package akka.testkit
 
@@ -65,6 +65,8 @@ abstract class AkkaSpec(_system: ActorSystem)
 
   val log: LoggingAdapter = Logging(system, this.getClass)
 
+  override val invokeBeforeAllAndAfterAllEvenIfNoTestsAreExpected = true
+
   final override def beforeAll {
     startCoroner
     atStartup()
@@ -72,7 +74,7 @@ abstract class AkkaSpec(_system: ActorSystem)
 
   final override def afterAll {
     beforeTermination()
-    shutdown(system)
+    shutdown()
     afterTermination()
     stopCoroner()
   }

@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2009-2013 Typesafe Inc. <http://www.typesafe.com>
+ * Copyright (C) 2009-2014 Typesafe Inc. <http://www.typesafe.com>
  */
 package docs.dispatcher
 
@@ -114,17 +114,6 @@ object DispatcherDocSpec {
     }
     //#my-bounded-config
 
-    //#my-balancing-config
-    my-balancing-dispatcher {
-      type = BalancingDispatcher
-      executor = "thread-pool-executor"
-      thread-pool-executor {
-        core-pool-size-factor = 8.0
-        max-pool-size-factor  = 16.0
-      }
-    }
-    //#my-balancing-config
-
     //#prio-dispatcher-config
     prio-dispatcher {
       mailbox-type = "docs.dispatcher.DispatcherDocSpec$MyPrioMailbox"
@@ -186,6 +175,14 @@ object DispatcherDocSpec {
       mailbox-type = "docs.dispatcher.MyUnboundedMailbox"
     }
     //#custom-mailbox-config
+
+    //#control-aware-mailbox-config
+    control-aware-dispatcher {
+      mailbox-type = "akka.dispatch.UnboundedControlAwareMailbox"
+      //Other dispatcher configuration goes here
+    }
+    //#control-aware-mailbox-config
+
   """
 
   //#prio-mailbox
@@ -212,6 +209,12 @@ object DispatcherDocSpec {
         case otherwise     => 1
       })
   //#prio-mailbox
+
+  //#control-aware-mailbox-messages
+  import akka.dispatch.ControlMessage
+
+  case object MyControlMessage extends ControlMessage
+  //#control-aware-mailbox-messages
 
   class MyActor extends Actor {
     def receive = {
@@ -342,8 +345,37 @@ class DispatcherDocSpec extends AkkaSpec(DispatcherDocSpec.config) {
     }
   }
 
-  "defining balancing dispatcher" in {
-    val dispatcher = system.dispatchers.lookup("my-balancing-dispatcher")
+  "defining control aware dispatcher" in {
+    new AnyRef {
+      //#control-aware-dispatcher
+
+      // We create a new Actor that just prints out what it processes
+      class Logger extends Actor {
+        val log: LoggingAdapter = Logging(context.system, this)
+
+        self ! 'foo
+        self ! 'bar
+        self ! MyControlMessage
+        self ! PoisonPill
+
+        def receive = {
+          case x => log.info(x.toString)
+        }
+      }
+      val a = system.actorOf(Props(classOf[Logger], this).withDispatcher(
+        "control-aware-dispatcher"))
+
+      /*
+       * Logs:
+       * MyControlMessage
+       * 'foo
+       * 'bar
+       */
+      //#control-aware-dispatcher
+
+      watch(a)
+      expectMsgPF() { case Terminated(`a`) => () }
+    }
   }
 
   "require custom mailbox on dispatcher" in {

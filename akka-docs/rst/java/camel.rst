@@ -89,6 +89,12 @@ Below you can see how you can get access to these Apache Camel objects.
 
 One ``CamelExtension`` is only loaded once for every one ``ActorSystem``, which makes it safe to call the ``CamelExtension`` at any point in your code to get to the
 Apache Camel objects associated with it. There is one `CamelContext`_ and one `ProducerTemplate`_ for every one ``ActorSystem`` that uses a ``CamelExtension``.
+By Default, a new `CamelContext`_ is created when the ``CamelExtension`` starts. If you want to inject your own context instead,
+you can implement the `ContextProvider`_ interface and add the FQCN of your implementation in the config, as the value of the "akka.camel.context-provider".
+This interface define a single method ``getContext()`` used to load the `CamelContext`_.
+
+.. _ContextProvider: @github@/akka-camel/src/main/scala/akka/camel/ContextProvider.scala
+
 Below an example on how to add the ActiveMQ component to the `CamelContext`_, which is required when you would like to use the ActiveMQ component.
 
 .. includecode:: code/docs/camel/CamelExtensionTest.java#CamelExtensionAddComponent
@@ -469,8 +475,8 @@ __ https://svn.apache.org/repos/asf/camel/tags/camel-2.8.0/camel-core/src/main/j
 Examples
 ========
 
-The `Typesafe Activator <http://typesafe.com/platform/getstarted>`_
-tutorial named `Akka Camel Samples with Java <http://typesafe.com/activator/template/akka-sample-camel-java>`_
+The `Typesafe Activator <http://www.typesafe.com/platform/getstarted>`_
+tutorial named `Akka Camel Samples with Java <http://www.typesafe.com/activator/template/akka-sample-camel-java>`_
 contains 3 samples:
 
  * Asynchronous routing and transformation - This example demonstrates how to implement consumer and 
@@ -481,6 +487,12 @@ contains 3 samples:
 
  * Quartz Scheduler Example - Showing how simple is to implement a cron-style scheduler by
    using the Camel Quartz component
+
+Configuration
+=============
+
+There are several configuration properties for the Camel module, please refer
+to the :ref:`reference configuration <config-akka-camel>`.
 
 Additional Resources
 ====================

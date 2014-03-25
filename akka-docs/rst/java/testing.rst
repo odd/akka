@@ -121,7 +121,7 @@ The Way In-Between: Expecting Exceptions
 If you want to test the actor behavior, including hotswapping, but without
 involving a dispatcher and without having the :class:`TestActorRef` swallow
 any thrown exceptions, then there is another mode available for you: just use
-the :meth:`receive` method :class:`TestActorRef`, which will be forwarded to the
+the :meth:`receive` method on :class:`TestActorRef`, which will be forwarded to the
 underlying actor:
 
 .. includecode:: code/docs/testkit/TestKitDocTest.java#test-expecting-exceptions
@@ -364,8 +364,8 @@ invariably lead to spurious test failures on the heavily loaded Jenkins server
 internally scaled by a factor taken from the :ref:`configuration`,
 ``akka.test.timefactor``, which defaults to 1.
 
-You can scale other durations with the same factor by using the implicit conversion
-in ``akka.testkit`` package object to add dilated function to :class:`Duration`.
+You can scale other durations with the same factor by using ``dilated`` method
+in :class:`JavaTestKit`.
 
 .. includecode:: code/docs/testkit/TestKitDocTest.java#duration-dilation
 
@@ -634,4 +634,9 @@ full logging of actor activities using this configuration fragment::
     }
   }
 
+Configuration
+=============
+
+There are several configuration properties for the TestKit module, please refer
+to the :ref:`reference configuration <config-akka-testkit>`.
 
