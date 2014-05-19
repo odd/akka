@@ -37,6 +37,13 @@ class BalancingSpec extends AkkaSpec(
           attempt-teamwork = on
         }
       }
+      /balancingPool-3 {
+        router = balancing-pool
+        nr-of-instances = 5
+        pool-dispatcher {
+          attempt-teamwork = on
+        }
+      }
     }
     """) with ImplicitSender with BeforeAndAfterEach {
   import BalancingSpec._
@@ -79,8 +86,15 @@ class BalancingSpec extends AkkaSpec(
 
     "deliver messages in a balancing fashion when defined in config" in {
       val latch = TestLatch(1)
-      val pool = system.actorOf(BalancingPool(1).props(routeeProps =
+      val pool = system.actorOf(FromConfig().props(routeeProps =
         Props(classOf[Worker], latch)), name = "balancingPool-2")
+      test(pool, latch)
+    }
+
+    "deliver messages in a balancing fashion when overridden in config" in {
+      val latch = TestLatch(1)
+      val pool = system.actorOf(BalancingPool(1).props(routeeProps =
+        Props(classOf[Worker], latch)), name = "balancingPool-3")
       test(pool, latch)
     }
 

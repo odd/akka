@@ -1,80 +1,79 @@
 package akka
 
 import sbt._
+import sbtunidoc.Plugin.UnidocKeys._
+import sbtunidoc.Plugin.{ ScalaUnidoc, JavaUnidoc, scalaJavaUnidocSettings, genjavadocSettings, scalaUnidocSettings }
 import sbt.Keys._
-import sbt.Project.Initialize
+import sbt.File
+import scala.annotation.tailrec
 
 object Unidoc {
 
-  lazy val JavaDoc = config("genjavadoc") extend Compile
+  def settings(ignoreAggregates: Seq[Project], ignoreProjects: Seq[Project]) = {
+    val withoutAggregates = ignoreAggregates.foldLeft(inAnyProject) { _ -- inAggregates(_, transitive = true, includeRoot = true) }
+    val docProjectFilter = ignoreProjects.foldLeft(withoutAggregates) { _ -- inProjects(_) }
 
-  lazy val GenJavaDocEnabled = Option(sys.props("akka.genjavadoc.enabled")) filter (_.toLowerCase == "true") map (_ => true) getOrElse false
-
-  lazy val javadocSettings =
-    inConfig(JavaDoc)(Defaults.configSettings) ++
-      (if (GenJavaDocEnabled) Seq(
-        packageDoc in Compile <<= packageDoc in JavaDoc,
-        sources in JavaDoc <<= (target, compile in Compile, sources in Compile) map ((t, c, s) =>
-          (t / "java" ** "*.java").get ++ s.filter(_.getName.endsWith(".java"))
-        ),
-        javacOptions in JavaDoc := Seq(),
-        artifactName in packageDoc in JavaDoc := ((sv, mod, art) => "" + mod.name + "_" + sv.binary + "-" + mod.revision + "-javadoc.jar"),
-        libraryDependencies += Dependencies.Compile.genjavadoc,
-        scalacOptions <+= target map (t => "-P:genjavadoc:out=" + (t / "java"))
-      ) else Nil)
-
-  val unidocDirectory = SettingKey[File]("unidoc-directory")
-  val unidocExclude = SettingKey[Seq[String]]("unidoc-exclude")
-  val unidocAllSources = TaskKey[Seq[Seq[File]]]("unidoc-all-sources")
-  val unidocSources = TaskKey[Seq[File]]("unidoc-sources")
-  val unidocAllClasspaths = TaskKey[Seq[Classpath]]("unidoc-all-classpaths")
-  val unidocClasspath = TaskKey[Seq[File]]("unidoc-classpath")
-  val unidoc = TaskKey[(File, File)]("unidoc", "Create unified scaladoc and javadoc for all aggregates")
-  val sunidoc = TaskKey[File]("sunidoc", "Create unified scaladoc for all aggregates")
-  val junidoc = TaskKey[File]("junidoc", "Create unified javadoc for all aggregates")
-  val junidocAllSources = TaskKey[Seq[Seq[File]]]("junidoc-all-sources")
-  val junidocSources = TaskKey[Seq[File]]("junidoc-sources")
-
-  lazy val settings = Seq(
-    unidocDirectory <<= crossTarget / "unidoc",
-    unidocExclude := Seq.empty,
-    unidocAllSources <<= (thisProjectRef, buildStructure, unidocExclude) flatMap allSources(Compile),
-    unidocSources <<= unidocAllSources map { _.flatten },
-    unidocAllClasspaths <<= (thisProjectRef, buildStructure, unidocExclude) flatMap allClasspaths,
-    unidocClasspath <<= unidocAllClasspaths map { _.flatten.map(_.data).distinct },
-    junidocAllSources <<= (thisProjectRef, buildStructure, unidocExclude) flatMap allSources(JavaDoc),
-    junidocSources <<= junidocAllSources map { _.flatten },
-    sunidoc <<= sunidocTask,
-    junidoc <<= (doc in JavaDoc),
-    unidoc <<= (sunidoc, junidoc) map ((s, t) ⇒ (s, t))
-  )
-
-  def allSources(conf: Configuration)(projectRef: ProjectRef, structure: Load.BuildStructure, exclude: Seq[String]): Task[Seq[Seq[File]]] = {
-    val projects = aggregated(projectRef, structure, exclude)
-    projects flatMap { sources in conf in LocalProject(_) get structure.data } join
+    inTask(unidoc)(Seq(
+      unidocProjectFilter in ScalaUnidoc := docProjectFilter,
+      unidocProjectFilter in JavaUnidoc := docProjectFilter,
+      apiMappings in ScalaUnidoc := (apiMappings in (Compile, doc)).value
+    ))
   }
 
-  def allClasspaths(projectRef: ProjectRef, structure: Load.BuildStructure, exclude: Seq[String]): Task[Seq[Classpath]] = {
-    val projects = aggregated(projectRef, structure, exclude)
-    projects flatMap { dependencyClasspath in Compile in LocalProject(_) get structure.data } join
+  val genjavadocEnabled = sys.props.get("akka.genjavadoc.enabled").getOrElse("false").toBoolean
+  val (unidocSettings, javadocSettings) =
+    if (genjavadocEnabled) (scalaJavaUnidocSettings, genjavadocSettings)
+    else (scalaUnidocSettings, Nil)
+
+  lazy val scaladocDiagramsEnabled = sys.props.get("akka.scaladoc.diagrams").getOrElse("true").toBoolean
+  lazy val scaladocAutoAPI = sys.props.get("akka.scaladoc.autoapi").getOrElse("true").toBoolean
+
+  def scaladocSettings: Seq[sbt.Setting[_]] = {
+    scaladocSettingsNoVerificationOfDiagrams ++
+      (if (scaladocDiagramsEnabled) Seq(doc in Compile ~= scaladocVerifier) else Seq.empty)
   }
 
-  def aggregated(projectRef: ProjectRef, structure: Load.BuildStructure, exclude: Seq[String]): Seq[String] = {
-    val aggregate = Project.getProject(projectRef, structure).toSeq.flatMap(_.aggregate)
-    aggregate flatMap { ref =>
-      if (exclude contains ref.project) Seq.empty
-      else ref.project +: aggregated(ref, structure, exclude)
-    }
+  // for projects with few (one) classes there might not be any diagrams
+  def scaladocSettingsNoVerificationOfDiagrams: Seq[sbt.Setting[_]] = {
+    inTask(doc)(Seq(
+      scalacOptions in Compile <++= (version, baseDirectory in ThisBuild) map scaladocOptions,
+      autoAPIMappings := scaladocAutoAPI
+    ))
   }
 
-  def sunidocTask: Initialize[Task[File]] = {
-    (compilers, cacheDirectory, unidocSources, unidocClasspath, unidocDirectory, scalacOptions in doc, apiMappings in (Compile, doc), streams) map {
-      (compilers, cache, sources, classpath, target, options, api, s) => {
-        val scaladoc = new Scaladoc(100, compilers.scalac)
-        val opts1 = options ++ Opts.doc.externalAPI(api)
-        scaladoc.cached(cache / "unidoc", "main", sources, classpath, target, opts1, s.log)
-        target
+  def scaladocOptions(ver: String, base: File): List[String] = {
+    val urlString = GitHub.url(ver) + "/€{FILE_PATH}.scala"
+    val opts = List("-implicits", "-doc-source-url", urlString, "-sourcepath", base.getAbsolutePath)
+    if (scaladocDiagramsEnabled) "-diagrams"::opts else opts
+  }
+
+  def scaladocVerifier(file: File): File= {
+    @tailrec
+    def findHTMLFileWithDiagram(dirs: Seq[File]): Boolean = {
+      if (dirs.isEmpty) false
+      else {
+        val curr = dirs.head
+        val (newDirs, files) = curr.listFiles.partition(_.isDirectory)
+        val rest = dirs.tail ++ newDirs
+        val hasDiagram = files exists { f =>
+          val name = f.getName
+          if (name.endsWith(".html") && !name.startsWith("index-") &&
+            !(name.compare("index.html") == 0) && !(name.compare("package.html") == 0)) {
+            val source = scala.io.Source.fromFile(f)("utf-8")
+            val hd = source.getLines().exists(_.contains("<div class=\"toggleContainer block diagram-container\" id=\"inheritance-diagram-container\">"))
+            source.close()
+            hd
+          }
+          else false
+        }
+        hasDiagram || findHTMLFileWithDiagram(rest)
       }
     }
+
+    // if we have generated scaladoc and none of the files have a diagram then fail
+    if (file.exists() && !findHTMLFileWithDiagram(List(file)))
+      sys.error("ScalaDoc diagrams not generated!")
+    else
+      file
   }
 }
