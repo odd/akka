@@ -47,6 +47,9 @@ object Dependencies {
     // Cluster Sample
     val sigar       = "org.fusesource"                   % "sigar"                        % "1.6.4"            // ApacheV2
 
+    // Scala Reflection (used by contrib.persistence.versioning)
+    val scalaReflection = "org.scala-lang" % "scala-reflect" % Versions.scalaVersion
+
     // Test
 
     object Test {
@@ -126,7 +129,7 @@ object Dependencies {
 
   val clusterSample = Seq(Test.scalatest, sigar)
 
-  val contrib = Seq(Test.junitIntf, Test.commonsIo)
+  val contrib = Seq(Test.junitIntf, Test.commonsIo, scalaReflection)
 
   val multiNodeSample = Seq(Test.scalatest)
 }
